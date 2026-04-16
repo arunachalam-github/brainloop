@@ -4,19 +4,16 @@ It’s Monday. 9:00 AM. You had a plan.
 Write a report.
 
 Four minutes later, you’re reading about the geopolitical conflict of a country you’ll never visit. 
-
 It started with a notification. Or maybe a headline. Or maybe you just needed to "quickly check one thing" before you began. 
 
 The exact trigger doesn't matter, because the result is always the same: one click became three, three became a search, then seventeen tabs, and now you're 20 minutes deep into something that has absolutely nothing to do with your morning, your report, or your job.
 
 Your brain?
-
 Somewhere else entirely.
 
 So, the human brain is wired to wonder which means the brain is naturally built to be curious, explore, and ask questions. But when it’s time to focus, that same wandering becomes your biggest distraction.
 
 You know what you did today.
-
 But do you know…
 
 ## How your mind actually worked while doing it?
