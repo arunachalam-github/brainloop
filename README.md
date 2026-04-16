@@ -18,9 +18,10 @@ But do you know…
 
 ## How your mind actually worked while doing it?
 
-Brainloop is a macOS background daemon that silently records your computer activity into a private local SQLite database. Ask Claude Code anything about your day — what you worked on, who you called, what you read.
+Brainloop is a macOS background daemon that silently records your computer activity into a private local SQLite database. All data stays on your Mac. Nothing is sent anywhere.
 
-All data stays on your Mac. Nothing is sent anywhere.
+It doesn’t just track what you did—
+it helps you understand how your mind moved through the day.
 
 ---
 
