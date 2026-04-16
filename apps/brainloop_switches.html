@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Brainloop — Today</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #f5f0e8;
+  color: #555;
+  font-family: 'Georgia', serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px 64px;
+}
+h1 { font-size: 15px; color: #666; font-weight: 400; margin-bottom: 4px; letter-spacing: 1px; text-transform: uppercase; }
+.subtitle { font-size: 11px; color: #aaa; margin-bottom: 32px; letter-spacing: 0.5px; }
+#legend {
+  display: flex; gap: 28px; margin-bottom: 40px;
+  font-size: 11px; font-family: 'SF Mono', monospace; color: #999;
+}
+.leg { display: flex; align-items: center; gap: 8px; }
+#chart-wrap { width: 100%; max-width: 900px; position: relative; }
+canvas { display: block; width: 100%; cursor: crosshair; }
+#tooltip {
+  position: fixed; pointer-events: none; display: none;
+  background: rgba(30,25,18,0.90); border-radius: 5px; padding: 8px 12px;
+  font-size: 11px; color: #ddd; z-index: 10;
+  font-family: 'SF Mono', monospace;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.25);
+  line-height: 1.7;
+}
+.tt-time  { color: #999; font-size: 10px; }
+.tt-state { font-size: 12px; font-weight: 600; color: #fff; }
+.tt-count { color: #aaa; }
+.tt-apps  { color: #666; font-size: 10px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<h1>Context Switch Wire — Today (05:30 – now)</h1>
+<div class="subtitle">10-minute buckets &nbsp;·&nbsp; Ovals = cognitive load &nbsp;·&nbsp; spin speed &amp; count scale with switches &nbsp;·&nbsp; 189 meaningful switches (5s+ dwell)</div>
+<div id="legend">
+  <div class="leg">
+    <svg width="28" height="18"><ellipse cx="14" cy="9" rx="11" ry="6" stroke="#2a2218" stroke-width="1.2" fill="none" opacity="0.6"/></svg>
+    Calm (1 oval)
+  </div>
+  <div class="leg">
+    <svg width="28" height="18"><ellipse cx="14" cy="9" rx="11" ry="6" stroke="#2a2218" stroke-width="1.3" fill="none" opacity="0.7"/><ellipse cx="14" cy="9" rx="6" ry="3.5" stroke="#2a2218" stroke-width="1" fill="none" opacity="0.5"/></svg>
+    Busy (2 ovals)
+  </div>
+  <div class="leg">
+    <svg width="28" height="18"><ellipse cx="14" cy="9" rx="11" ry="6" stroke="#2a2218" stroke-width="1.4" fill="none"/><ellipse cx="14" cy="9" rx="6" ry="3.5" stroke="#2a2218" stroke-width="1.1" fill="none" opacity="0.7"/><ellipse cx="14" cy="9" rx="3" ry="2" stroke="#2a2218" stroke-width="0.9" fill="none" opacity="0.5"/></svg>
+    Chaotic (3 ovals)
+  </div>
+</div>
+<div id="chart-wrap"><canvas id="c"></canvas></div>
+<div id="tooltip"></div>
+
+<script>
+const DATA = {"buckets": [{"idx": 0, "count": 8, "apps": ["Code", "Google Chrome"]}, {"idx": 1, "count": 12, "apps": ["Google Chrome", "Claude", "Code", "Slack"]}, {"idx": 2, "count": 8, "apps": ["Google Chrome", "Code"]}, {"idx": 3, "count": 5, "apps": ["Google Chrome", "Code"]}, {"idx": 4, "count": 10, "apps": ["Code", "Google Chrome", "Claude"]}, {"idx": 5, "count": 11, "apps": ["Code", "Google Chrome", "Claude"]}, {"idx": 6, "count": 24, "apps": ["Code", "Google Chrome", "System Settings", "Claude", "Slack"]}, {"idx": 7, "count": 0, "apps": []}, {"idx": 8, "count": 4, "apps": ["Claude", "Google Chrome", "Code"]}, {"idx": 9, "count": 19, "apps": ["Google Chrome", "Code", "Claude"]}, {"idx": 10, "count": 12, "apps": ["Claude", "Code", "Google Chrome"]}, {"idx": 11, "count": 6, "apps": ["Code", "Google Chrome", "Claude"]}, {"idx": 12, "count": 2, "apps": ["Google Chrome", "Code"]}, {"idx": 13, "count": 7, "apps": ["Google Chrome", "Code"]}, {"idx": 14, "count": 6, "apps": ["Google Chrome", "Code"]}, {"idx": 15, "count": 6, "apps": ["Google Chrome", "Code", "Claude", "Slack"]}, {"idx": 16, "count": 5, "apps": ["Code", "Google Chrome"]}, {"idx": 17, "count": 5, "apps": ["Code", "Google Chrome"]}, {"idx": 18, "count": 3, "apps": ["Code", "Google Chrome"]}, {"idx": 19, "count": 1, "apps": ["Google Chrome"]}, {"idx": 20, "count": 0, "apps": []}, {"idx": 21, "count": 0, "apps": []}, {"idx": 22, "count": 0, "apps": []}, {"idx": 23, "count": 0, "apps": []}, {"idx": 24, "count": 7, "apps": ["Google Chrome", "Slack", "Code"]}, {"idx": 25, "count": 6, "apps": ["Google Chrome", "Slack", "Code"]}, {"idx": 26, "count": 9, "apps": ["Google Chrome", "Code", "Slack"]}, {"idx": 27, "count": 11, "apps": ["Google Chrome", "Slack", "Code"]}], "labels": [{"label": "05:30", "idx_f": 0.0}, {"label": "06:00", "idx_f": 3.0}, {"label": "06:30", "idx_f": 6.0}, {"label": "07:00", "idx_f": 9.0}, {"label": "07:30", "idx_f": 12.0}, {"label": "08:00", "idx_f": 15.0}, {"label": "08:30", "idx_f": 18.0}, {"label": "09:00", "idx_f": 21.0}, {"label": "09:30", "idx_f": 24.0}], "total": 189, "window_start_ms": 1776297606259, "bucket_secs": 600};
+
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const tip    = document.getElementById('tooltip');
+
+const PAD_L = 48, PAD_R = 32, PAD_T = 40, PAD_B = 52;
+const WIRE  = '#2a2218';
+
+const MAX_COUNT = Math.max(...DATA.buckets.map(b => b.count), 1);
+const T_CALM = 10;
+const T_BUSY = 25;
+
+function stateOf(count) {
+  if (count === 0)     return 'empty';
+  if (count < T_CALM)  return 'calm';
+  if (count <= T_BUSY) return 'busy';
+  return 'chaotic';
+}
+
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return () => { s=(Math.imul(1664525,s)+1013904223)>>>0; return s/0xFFFFFFFF; };
+}
+
+let bucketOvals = [];
+let W = 0, H = 0;
+
+function buildOvals(w, h) {
+  const plotW = w - PAD_L - PAD_R;
+  const plotH = h - PAD_T - PAD_B;
+  const midY  = PAD_T + plotH / 2;
+  const bw    = plotW / DATA.buckets.length;
+  bucketOvals = [];
+
+  DATA.buckets.forEach((b, i) => {
+    const rng   = makeRng(i * 137 + 31);
+    const state = stateOf(b.count);
+    const t     = b.count / MAX_COUNT;  // 0..1, drives speed
+    const cx    = PAD_L + (i + 0.5) * bw;
+    const cy    = midY;
+
+    const maxRx = bw * 0.42;
+    const maxRy = plotH * 0.38;
+
+    const ovals = [];
+
+    // Fixed oval count per state: empty=0, calm=1, busy=2, chaotic=3
+    // Speed scales continuously with switch count within each state
+    const n = state === 'empty' ? 0 : state === 'calm' ? 1 : state === 'busy' ? 2 : 3;
+
+    if (b.count === 0) {
+      ovals.push({ rx: 1.5, ry: 1.5, tilt0: 0, speed: 0, phase: 0, alpha: 0.15, lw: 0.8 });
+
+    } else {
+      // Sizes: first oval largest, each subsequent one smaller and tilted differently
+      const scales = [0.75, 0.50, 0.32];
+      for (let k = 0; k < n; k++) {
+        const scale = scales[k];
+        // Speed: calm base 0.1–0.3, busy 0.4–0.9, chaotic 1.0–2.5, all scale with t
+        const baseSpeed = state === 'calm'    ? 0.10 + t * 0.20
+                        : state === 'busy'    ? 0.40 + t * 0.50
+                        : /* chaotic */         1.00 + t * 1.50;
+        const dir = k % 2 === 0 ? 1 : -1;
+        ovals.push({
+          rx:    maxRx * scale,
+          ry:    maxRy * scale * (0.45 + rng() * 0.25),
+          tilt0: rng() * Math.PI * 2,
+          speed: baseSpeed * dir,
+          phase: rng() * Math.PI * 2,
+          alpha: 0.30 + (1 - k / n) * 0.30,
+          lw:    0.8 + (1 - k / n) * 0.6,
+        });
+      }
+    }
+
+    bucketOvals.push({ cx, cy, ovals, state, b });
+  });
+}
+
+function drawOval(cx, cy, rx, ry, tilt, alpha, lw) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = WIRE;
+  ctx.lineWidth   = lw;
+  ctx.lineJoin    = 'round';
+  ctx.translate(cx, cy);
+  ctx.rotate(tilt);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, Math.max(rx, 1), Math.max(ry, 0.5), 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = canvas.parentElement.getBoundingClientRect().width;
+  H = 400;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+  buildOvals(W, H);
+}
+
+function drawGrid() {
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+  const midY  = PAD_T + plotH / 2;
+  const bw    = plotW / DATA.buckets.length;
+
+  ctx.save();
+  DATA.labels.forEach(l => {
+    const x = PAD_L + l.idx_f * bw;
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, PAD_T); ctx.lineTo(x, H - PAD_B); ctx.stroke();
+    const dt = new Date(DATA.window_start_ms + l.idx_f * DATA.bucket_secs * 1000);
+    const h = dt.getHours(), m = dt.getMinutes();
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    const label = `${h12}:${String(m).padStart(2,'0')} ${ampm}`;
+    ctx.fillStyle = 'rgba(0,0,0,0.50)';
+    ctx.font = 'bold 13px SF Mono,monospace'; ctx.textAlign = 'left';
+    ctx.fillText(label, x + 4, H - PAD_B + 22);
+  });
+  ctx.setLineDash([3, 9]);
+  ctx.strokeStyle = 'rgba(0,0,0,0.07)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PAD_L, midY); ctx.lineTo(PAD_L + plotW, midY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  for (let i = 1; i < DATA.buckets.length; i++) {
+    const x = PAD_L + i * bw;
+    ctx.strokeStyle = 'rgba(0,0,0,0.03)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, PAD_T); ctx.lineTo(x, H - PAD_B); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSpine() {
+  if (!bucketOvals.length) return;
+  ctx.save();
+  ctx.strokeStyle = WIRE;
+  ctx.lineWidth   = 0.6;
+  ctx.globalAlpha = 0.08;
+  ctx.lineJoin    = 'round';
+  ctx.beginPath();
+  ctx.moveTo(PAD_L, bucketOvals[0].cy);
+  bucketOvals.forEach(bo => { ctx.lineTo(bo.cx, bo.cy); });
+  ctx.lineTo(W - PAD_R, bucketOvals[0].cy);
+  ctx.stroke();
+  ctx.restore();
+}
+
+let raf;
+function animate(ts) {
+  const t = ts / 1000;
+  ctx.clearRect(0, 0, W, H);
+  drawGrid();
+  drawSpine();
+  bucketOvals.forEach(bo => {
+    bo.ovals.forEach(ov => {
+      const tilt = ov.tilt0 + ov.speed * t + ov.phase;
+      drawOval(bo.cx, bo.cy, ov.rx, ov.ry, tilt, ov.alpha, ov.lw);
+    });
+  });
+  raf = requestAnimationFrame(animate);
+}
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const x    = e.clientX - rect.left;
+  const bw   = (W - PAD_L - PAD_R) / DATA.buckets.length;
+  if (x < PAD_L || x > W - PAD_R) { tip.style.display = 'none'; return; }
+  const idx = Math.min(DATA.buckets.length - 1, Math.floor((x - PAD_L) / bw));
+  const b   = DATA.buckets[idx];
+  const s   = stateOf(b.count);
+  const tS  = new Date(DATA.window_start_ms + idx * DATA.bucket_secs * 1000);
+  const tE  = new Date(DATA.window_start_ms + (idx + 1) * DATA.bucket_secs * 1000);
+  const fmt = d => d.toTimeString().slice(0, 5);
+  const stateLabel = s === 'empty' ? '— Empty' : s === 'calm' ? '😌 Calm' : s === 'busy' ? '⚡ Busy' : '🌀 Chaotic';
+  tip.innerHTML = `
+    <div class="tt-time">${fmt(tS)} – ${fmt(tE)}</div>
+    <div class="tt-state">${stateLabel}</div>
+    <div class="tt-count">${b.count} switches</div>
+    ${b.apps.length ? `<div class="tt-apps">${b.apps.join(' · ')}</div>` : ''}
+  `;
+  tip.style.display = 'block';
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top  = (e.clientY - 10) + 'px';
+});
+canvas.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(raf);
+  resize();
+  raf = requestAnimationFrame(animate);
+});
+
+resize();
+raf = requestAnimationFrame(animate);
+</script>
+</body>
+</html>
