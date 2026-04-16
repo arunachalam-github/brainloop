@@ -10,7 +10,7 @@
     <array>
         <string>{{PYTHON3_PATH}}</string>
         <string>-m</string>
-        <string>brainloop.daemon</string>
+        <string>daemon.daemon</string>
     </array>
 
     <key>WorkingDirectory</key>
