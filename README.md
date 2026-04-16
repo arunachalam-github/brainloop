@@ -15,9 +15,8 @@ So, the human brain is wired to wonder which means the brain is naturally built 
 
 You know what you did today.
 But do you know…
-## How your mind actually worked while doing it?
 
----
+## How your mind actually worked while doing it?
 
 Brainloop is a macOS background daemon that silently records your computer activity into a private local SQLite database. Ask Claude Code anything about your day — what you worked on, who you called, what you read.
 
