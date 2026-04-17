@@ -30,3 +30,6 @@ com.brainloop.agent.plist
 
 # Environment
 .env
+
+# Git worktrees (local isolation; never commit)
+.worktrees/
