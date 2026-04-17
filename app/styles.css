@@ -1,0 +1,110 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --cream: #f5f0e8;
+  --ink: #2a2218;
+}
+
+html, body {
+  height: 100%;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--cream);
+}
+
+/* Tab bar */
+#tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 18px 32px;
+  background: var(--cream);
+}
+
+.tab {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: rgba(42, 34, 24, 0.40);
+  padding-bottom: 6px;
+  border-bottom: 1px solid transparent;
+  transition: color 0.4s ease, border-color 0.4s ease;
+  position: relative;
+}
+
+.tab:hover {
+  color: rgba(42, 34, 24, 0.60);
+}
+
+.tab.active {
+  color: rgba(42, 34, 24, 0.90);
+  border-bottom-color: rgba(42, 34, 24, 0.80);
+}
+
+/* Divider */
+.divider {
+  height: 1px;
+  background: rgba(42, 34, 24, 0.06);
+}
+
+/* Content area */
+#content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.screen {
+  display: none;
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px;
+  background: var(--cream);
+}
+
+.screen.active {
+  display: flex;
+}
+
+.screen h1 {
+  font-size: 48px;
+  font-weight: 400;
+  font-style: italic;
+  color: rgba(42, 34, 24, 0.90);
+  text-align: center;
+}
+
+.screen p {
+  font-size: 14px;
+  font-style: italic;
+  color: rgba(42, 34, 24, 0.40);
+  text-align: center;
+}
+
+.row-count {
+  margin-top: 16px;
+  font-size: 12px;
+  font-style: normal;
+  letter-spacing: 0.5px;
+  color: rgba(42, 34, 24, 0.30);
+}

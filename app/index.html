@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brainloop</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <nav id="tab-bar">
+      <button class="tab active" data-tab="today">TODAY</button>
+      <button class="tab" data-tab="week">WEEK</button>
+      <button class="tab" data-tab="ask">ASK</button>
+      <button class="tab" data-tab="settings">SETTINGS</button>
+    </nav>
+    <div class="divider"></div>
+    <main id="content">
+      <section class="screen active" id="screen-today">
+        <h1>today</h1>
+        <p>today's data will appear here</p>
+      </section>
+      <section class="screen" id="screen-week">
+        <h1>the past week</h1>
+        <p>seven day-rows will appear here</p>
+      </section>
+      <section class="screen" id="screen-ask">
+        <h1>ask brainloop</h1>
+        <p>configure an endpoint in Settings to ask questions about your day</p>
+      </section>
+      <section class="screen" id="screen-settings">
+        <h1>settings</h1>
+        <p>capture, permissions, ask config, and data tools land here</p>
+        <p id="row-count-display" class="row-count"></p>
+      </section>
+    </main>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
