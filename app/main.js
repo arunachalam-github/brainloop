@@ -1,5 +1,3 @@
-const { invoke } = window.__TAURI__.core;
-
 const TABS = ['today', 'week', 'ask', 'settings'];
 
 function switchTab(name) {
@@ -31,6 +29,7 @@ document.addEventListener('keydown', (e) => {
 // Show row count in Settings
 async function loadRowCount() {
   try {
+    const { invoke } = window.__TAURI__.core;
     const count = await invoke('row_count');
     const el = document.getElementById('row-count-display');
     if (el) {
