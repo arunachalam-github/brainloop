@@ -258,9 +258,27 @@ a { color: inherit; }
   box-shadow: 0 8px 24px rgba(34,26,18,0.18);
   max-width: 280px;
 }
-.viz-tooltip .t-time  { opacity: 0.55; font-size: 10px; }
-.viz-tooltip .t-state { font-weight: 600; font-size: 12px; }
-.viz-tooltip .t-apps  { opacity: 0.65; font-size: 10px; margin-top: 4px; line-height: 1.5; }
+.viz-tooltip .t-time  { opacity: 0.55; font-size: 10px; margin-bottom: 2px; }
+.viz-tooltip .t-state { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.viz-tooltip .t-dot   { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.viz-tooltip .t-apps  { opacity: 0.65; font-size: 10px; margin-top: 6px; line-height: 1.55; }
+
+/* ── Hour tick labels under the waveform ─────────────────────────────── */
+.viz-ticks {
+  position: relative;
+  height: 18px;
+  margin-top: 6px;
+}
+.viz-ticks .tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-40);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
 
 /* ── Timeline (morning/afternoon/evening) ───────────────────────────── */
 

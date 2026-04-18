@@ -119,18 +119,32 @@ function wireTabs() {
   });
 }
 
-// ─── Seismo canvas paint ─────────────────────────────────────────────
-// Vertical bars — one per bucket — coloured by `state`, height encoding
-// `count`. Animates rise on first paint (1200ms), then stays still.
-const STATE_ALPHA = { empty: 0.06, calm: 0.26, busy: 0.58, chaotic: 0.9 };
-const STATE_HEIGHT_MIN = { empty: 0.06, calm: 0.22, busy: 0.58, chaotic: 1.0 };
+// ─── Seismograph waveform ────────────────────────────────────────────
+// Continuous horizontal line that oscillates vertically with amplitude and
+// frequency both scaling to a bucket's switch count. Empty / calm buckets
+// stay close to flat; chaotic buckets show tall dense tremors.
+//
+// Last painted state (buckets, layout geometry) is stashed on the canvas
+// so the hover handler can do a hit-test without recomputing.
+const STATE_AMPLITUDE = { empty: 0.02, calm: 0.18, busy: 0.5, chaotic: 0.95 };
 
-function paintSeismo(canvas, buckets) {
+// Tiny deterministic PRNG so repaints on resize produce the same waveform
+// rather than wobbling randomly each time.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function paintWaveform(canvas, buckets) {
   if (!canvas) return;
-  if (!Array.isArray(buckets) || buckets.length === 0) {
-    // Paint a thin baseline so the canvas isn't a blank square.
-    buckets = [];
-  }
+  buckets = Array.isArray(buckets) ? buckets : [];
+
   const dpr = window.devicePixelRatio || 1;
   const cssW = canvas.clientWidth || 1104;
   const cssH = 190;
@@ -140,20 +154,46 @@ function paintSeismo(canvas, buckets) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const n = Math.max(buckets.length, 1);
+  const paddingX = 4;
+  const availW  = cssW - paddingX * 2;
+  const midY    = cssH / 2;
+  const maxAmp  = (cssH / 2) - 10;
   const maxCount = Math.max(1, ...buckets.map(b => b?.count || 0));
-  const paddingX = 2;
-  const availW = cssW - paddingX * 2;
-  const barSlot = availW / n;
-  const barWidth = Math.max(3, Math.min(18, barSlot - 3));
-  const baselineY = cssH - 8;
-  const topMargin = 14;
-  const usableH = baselineY - topMargin;
+  const bucketW = availW / Math.max(buckets.length, 1);
 
+  // Pre-compute a y-offset for every x pixel. Mixing a handful of sine
+  // harmonics + low-amplitude noise gives an organic seismograph shape
+  // without a real DSP. Amplitude at x is driven by the bucket under x.
+  const n = Math.round(availW);
+  const ys = new Float32Array(n);
+  const rnd = mulberry32(42);
+  // Phase table — one phase per bucket so "busy" runs have coherent
+  // signature rather than per-pixel static.
+  const phases = buckets.map(() => rnd() * Math.PI * 2);
+
+  for (let i = 0; i < n; i++) {
+    const x = i;
+    const bucketIdx = Math.min(buckets.length - 1, Math.floor(x / bucketW));
+    const b = buckets[bucketIdx] || {};
+    const countNorm = (b.count || 0) / maxCount;
+    const stateAmp  = STATE_AMPLITUDE[b.state || 'empty'] ?? 0.02;
+    const amp = Math.max(countNorm, stateAmp) * maxAmp;
+
+    // Frequency — chaotic buckets cram more oscillations per pixel.
+    const freq  = 0.18 + countNorm * 1.1;           // radians per px
+    const noise = (rnd() - 0.5) * 0.18;              // ±9% jitter
+    const phase = phases[bucketIdx] || 0;
+    const base  = Math.sin(x * freq + phase);
+    const harm  = Math.sin(x * freq * 2.3 + phase * 0.7) * 0.35;
+    ys[i] = (base + harm + noise) * amp;
+  }
+
+  // Cache layout + hit-test geometry for the hover handler.
+  canvas._viz = { buckets, paddingX, bucketW, midY, cssW, cssH };
+
+  // First-paint rise animation: scale ys from 0 → 1 over DURATION.
+  const DURATION = 1100;
   const start = performance.now();
-  const DURATION = 1200;
-
-  // Cancel any previous RAF loop still running on this canvas.
   if (canvas._raf) cancelAnimationFrame(canvas._raf);
 
   function frame(t) {
@@ -162,50 +202,143 @@ function paintSeismo(canvas, buckets) {
 
     ctx.clearRect(0, 0, cssW, cssH);
 
-    // faint baseline
-    ctx.strokeStyle = 'rgba(34,26,18,0.12)';
+    // Gentle zero-line under the wave.
+    ctx.strokeStyle = 'rgba(34,26,18,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, baselineY + 0.5);
-    ctx.lineTo(cssW, baselineY + 0.5);
+    ctx.moveTo(paddingX, midY + 0.5);
+    ctx.lineTo(cssW - paddingX, midY + 0.5);
     ctx.stroke();
 
-    for (let i = 0; i < buckets.length; i++) {
-      const b = buckets[i] || {};
-      const state = b.state || 'empty';
-      const alpha = STATE_ALPHA[state] ?? 0.06;
-
-      // height normalisation: combine absolute count with state floor.
-      const stateFloor = STATE_HEIGHT_MIN[state] ?? 0.06;
-      const countNorm = (b.count || 0) / maxCount;
-      const h = Math.max(stateFloor, countNorm) * usableH * eased;
-
-      const xCenter = paddingX + (i + 0.5) * barSlot;
-      const x = xCenter - barWidth / 2;
-      const y = baselineY - h;
-
-      ctx.fillStyle = `rgba(34,26,18,${alpha})`;
-      // tiny rounded tops
-      const r = Math.min(barWidth / 2, 2);
-      ctx.beginPath();
-      ctx.moveTo(x, baselineY);
-      ctx.lineTo(x, y + r);
-      ctx.quadraticCurveTo(x, y, x + r, y);
-      ctx.lineTo(x + barWidth - r, y);
-      ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + r);
-      ctx.lineTo(x + barWidth, baselineY);
-      ctx.closePath();
-      ctx.fill();
+    ctx.strokeStyle = 'rgba(34,26,18,0.75)';
+    ctx.lineWidth = 1.2;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(paddingX, midY);
+    for (let i = 0; i < n; i++) {
+      ctx.lineTo(paddingX + i, midY + ys[i] * eased);
     }
+    ctx.stroke();
 
-    if (progress < 1) {
-      canvas._raf = requestAnimationFrame(frame);
-    } else {
-      canvas._raf = null;
-    }
+    if (progress < 1) canvas._raf = requestAnimationFrame(frame);
+    else canvas._raf = null;
   }
-
   canvas._raf = requestAnimationFrame(frame);
+}
+
+// ─── Hour tick labels under the canvas ───────────────────────────────
+function renderHourTicks(container, buckets) {
+  if (!container) return;
+  if (!Array.isArray(buckets) || buckets.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  const firstTs = buckets[0].start_ts;
+  const lastTs  = buckets[buckets.length - 1].start_ts + 600; // +10 min
+  const spanSec = Math.max(1, lastTs - firstTs);
+
+  // Pick tick cadence: aim for 4-7 visible labels across the span.
+  const hoursSpan = spanSec / 3600;
+  const step = hoursSpan >= 12 ? 2 : 1;
+
+  const firstHour = new Date(firstTs * 1000);
+  firstHour.setMinutes(0, 0, 0);
+  // Round forward to next hour if firstTs wasn't on the hour.
+  if (firstHour.getTime() / 1000 < firstTs) firstHour.setHours(firstHour.getHours() + 1);
+
+  const out = [];
+  const startMs = firstHour.getTime();
+  for (let t = startMs / 1000; t <= lastTs; t += step * 3600) {
+    const d = new Date(t * 1000);
+    const h = d.getHours();
+    const label = h === 0 ? '12AM' : h === 12 ? '12PM' : h > 12 ? `${h - 12}PM` : `${h}AM`;
+    const frac = (t - firstTs) / spanSec;
+    out.push(`<span class="tick" style="left: ${Math.max(0, Math.min(1, frac)) * 100}%">${label}</span>`);
+  }
+  container.innerHTML = out.join('');
+}
+
+// ─── Hover tooltip ───────────────────────────────────────────────────
+// Shows time range, state · N switches, and — lazily fetched via
+// bucket_apps() — top apps the user was in during that bucket. We cache
+// per-bucket results on the bucket object to avoid re-querying on every
+// mousemove.
+const STATE_DOT_COLOR = {
+  empty:   'rgba(245,240,232,0.45)',
+  calm:    'rgba(245,240,232,0.70)',
+  busy:    'rgba(245,240,232,0.88)',
+  chaotic: 'rgba(245,240,232,1.00)',
+};
+
+function fmtClock(ts) {
+  const d = new Date(ts * 1000);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+function wireVizHover(canvas, tooltip) {
+  if (!canvas || !tooltip) return;
+
+  let activeIdx = -1;
+
+  const render = async (b, idx) => {
+    tooltip.innerHTML = `
+      <div class="t-time">${escapeHtml(fmtClock(b.start_ts))} – ${escapeHtml(fmtClock(b.start_ts + 600))}</div>
+      <div class="t-state">
+        <span class="t-dot" style="background:${STATE_DOT_COLOR[b.state] || STATE_DOT_COLOR.empty}"></span>
+        ${escapeHtml(b.state)} · ${b.count} switch${b.count === 1 ? '' : 'es'}
+      </div>
+      <div class="t-apps" id="t-apps-${idx}">${b._apps ? escapeHtml(b._apps) : '…'}</div>`;
+
+    if (b._apps !== undefined) return;
+    try {
+      const res = await invokeCmd('bucket_apps', { startTs: b.start_ts, endTs: b.start_ts + 600 });
+      const apps = res?.apps?.map(a => a.app).filter(Boolean) || [];
+      b._apps = apps.length ? apps.join(' · ') : '(no capture in this window)';
+      if (activeIdx === idx) {
+        const el = tooltip.querySelector(`#t-apps-${idx}`);
+        if (el) el.textContent = b._apps;
+      }
+    } catch (_e) {
+      b._apps = '';
+    }
+  };
+
+  canvas.addEventListener('mousemove', (e) => {
+    const st = canvas._viz;
+    if (!st || !st.buckets.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const xCss = e.clientX - rect.left;
+    const xLocal = xCss - st.paddingX;
+    const idx = Math.max(0, Math.min(st.buckets.length - 1, Math.floor(xLocal / st.bucketW)));
+    const b = st.buckets[idx];
+    if (!b) return;
+
+    if (idx !== activeIdx) {
+      activeIdx = idx;
+      render(b, idx);
+    }
+
+    tooltip.style.display = 'block';
+    // Position tooltip relative to viewport; slight offset from cursor.
+    const offset = 14;
+    const vw = window.innerWidth;
+    const ttRect = tooltip.getBoundingClientRect();
+    let left = e.clientX + offset;
+    if (left + ttRect.width + 8 > vw) left = e.clientX - ttRect.width - offset;
+    let top = e.clientY - ttRect.height / 2;
+    if (top < 8) top = 8;
+    tooltip.style.left = left + 'px';
+    tooltip.style.top  = top  + 'px';
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    tooltip.style.display = 'none';
+    activeIdx = -1;
+  });
 }
 
 // ─── Today rendering ─────────────────────────────────────────────────
@@ -251,7 +384,8 @@ function renderToday(root, summary) {
       <div class="section-label">How your attention moved — ${escapeHtml(totalSwitches)} switches</div>
       ${legendHtml}
       <div class="viz-wrap">
-        <canvas id="seismo-canvas" data-viz="seismo"></canvas>
+        <canvas id="seismo-canvas" data-viz="waveform"></canvas>
+        <div id="viz-ticks" class="viz-ticks"></div>
       </div>
     </section>
 
@@ -266,20 +400,24 @@ function renderToday(root, summary) {
     </section>
   `;
 
-  // Paint once after the canvas is in the DOM and has a size.
+  // Paint once after the canvas is in the DOM and has a size, and wire the
+  // hover tooltip. Tick labels are rendered from the same bucket list.
   requestAnimationFrame(() => {
     const canvas = document.getElementById('seismo-canvas');
-    paintSeismo(canvas, buckets);
+    paintWaveform(canvas, buckets);
+    renderHourTicks(document.getElementById('viz-ticks'), buckets);
+    wireVizHover(canvas, document.getElementById('viz-tooltip'));
   });
 
-  // repaint on resize — debounced.
+  // Repaint on resize — debounced.
   if (!window._seismoResizeWired) {
     let t = null;
     window.addEventListener('resize', () => {
       clearTimeout(t);
       t = setTimeout(() => {
         const c = document.getElementById('seismo-canvas');
-        if (c) paintSeismo(c, buckets);
+        if (c) paintWaveform(c, buckets);
+        renderHourTicks(document.getElementById('viz-ticks'), buckets);
       }, 180);
     });
     window._seismoResizeWired = true;

@@ -153,9 +153,72 @@ fn daemon_status() -> Result<DaemonStatus, String> {
     Ok(DaemonStatus { running, last_row_age_secs, total_today })
 }
 
+#[derive(Serialize)]
+struct AppSlice {
+    app: String,
+    minutes: i64,
+}
+
+#[derive(Serialize)]
+struct BucketApps {
+    apps: Vec<AppSlice>,
+    total_rows: i64,
+}
+
+/// Top apps inside a `[start_ts, end_ts)` time window, ordered by heartbeat
+/// row count. Used by the waveform hover tooltip to say what the user was
+/// actually doing in that 10-minute bucket. Each `minutes` is the number of
+/// activity_log rows (heartbeats + events), not literal minutes — but at the
+/// current 60 s heartbeat cadence it's close enough that the label reads cleanly.
+#[tauri::command]
+fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(BucketApps { apps: vec![], total_rows: 0 });
+    }
+    let conn = open_read_only()?;
+
+    let total_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM activity_log WHERE ts >= ? AND ts < ?",
+            [start_ts, end_ts],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT COALESCE(app_name, '—') AS app, COUNT(*) AS n
+             FROM activity_log
+             WHERE ts >= ? AND ts < ?
+             GROUP BY app
+             ORDER BY n DESC
+             LIMIT 3",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let apps: Vec<AppSlice> = stmt
+        .query_map([start_ts, end_ts], |row| {
+            Ok(AppSlice {
+                app: row.get::<_, String>(0)?,
+                minutes: row.get::<_, i64>(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(BucketApps { apps, total_rows })
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![row_count, today_summary, daemon_status])
+        .invoke_handler(tauri::generate_handler![
+            row_count,
+            today_summary,
+            daemon_status,
+            bucket_apps
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
