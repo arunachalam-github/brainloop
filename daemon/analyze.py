@@ -151,23 +151,68 @@ _BROWSER_SOURCES = {
     "duckduckgo",
 }
 
+# Platform fingerprints for the sanitizer's fallback labeling: when the LLM
+# emits source=<browser>, try to infer the actual platform by scanning the
+# title + body for these keywords. First match wins, so order matters — put
+# more specific fingerprints before generic ones.
+_PLATFORM_FINGERPRINTS = (
+    ("YouTube",     ("youtube", "shorts", "subscriptions", "watch later", "simulcast")),
+    ("Crunchyroll", ("crunchyroll", "simulcast")),
+    ("Netflix",     ("netflix",)),
+    ("Twitch",      ("twitch", "streamer")),
+    ("X / Twitter", ("twitter", "tweet", " x ")),
+    ("Reddit",      ("reddit", "r/", "u/")),
+    ("Facebook",    ("facebook", "news feed")),
+    ("Instagram",   ("instagram", "reels")),
+    ("LinkedIn",    ("linkedin",)),
+    ("Hacker News", ("hacker news", "news.ycombinator")),
+    ("GitHub",      ("github.com", "pull request", "commit ")),
+    ("Medium",      ("medium.com", "min read")),
+    ("Wikipedia",   ("wikipedia", "encyclopedia")),
+)
+
+
+def _infer_platform(title: str, haystack: str = "") -> str | None:
+    """Best-effort platform label from the entry's title + any haystack text.
+
+    Returns None if nothing matches — caller decides what to do with
+    browser-labeled entries in that case.
+    """
+    blob = f"{title} {haystack}".lower()
+    for platform, needles in _PLATFORM_FINGERPRINTS:
+        if any(n in blob for n in needles):
+            return platform
+    return None
+
 
 def _sanitize_payload(payload: dict) -> None:
     """Trim widgets the model got wrong. Mutates in place.
 
-    Currently: drop `things_read` entries whose `source` is a browser app
-    rather than a content platform (YouTube, Twitter, etc.). Gemini keeps
-    falling back to the browser name when it can't identify the platform
-    from page_text, despite explicit prompt guidance against it.
+    For `things_read`: if `source` looks like a browser app name ("Comet",
+    "Chrome", ...), try to relabel it with an inferred platform from the
+    entry's title. Only drop an entry if inference also fails — better to
+    show "Yennai Arindhal scenes · YouTube" than nothing at all when the
+    model was timid about naming the platform.
     """
     try:
         items = payload.get("widgets", {}).get("things_read") or []
     except AttributeError:
         return
-    cleaned = [
-        it for it in items
-        if isinstance(it, dict) and (it.get("source") or "").strip().lower() not in _BROWSER_SOURCES
-    ]
+    cleaned: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        src = (it.get("source") or "").strip()
+        if src.lower() in _BROWSER_SOURCES:
+            inferred = _infer_platform(it.get("title") or "")
+            if inferred:
+                it["source"] = inferred
+            else:
+                # No platform signal at all — keep it with a neutral "Web"
+                # label rather than dropping; the user can still see they
+                # spent time reading something.
+                it["source"] = "Web"
+        cleaned.append(it)
     payload["widgets"]["things_read"] = cleaned
 
 

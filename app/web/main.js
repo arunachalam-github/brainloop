@@ -372,11 +372,27 @@ function wireVizHover(canvas, tooltip) {
 }
 
 // ─── Today rendering ─────────────────────────────────────────────────
-function renderTodayEmpty(root, todayDate) {
+function renderTodayEmpty(root, todayDate, reason) {
+  // `reason` is one of:
+  //   'no-key'    → Settings has no API key configured; the analyzer
+  //                 can't run at all until one is added.
+  //   'no-data'   → key is set, but the daemon hasn't captured enough
+  //                 yet (fresh install, or waiting on next tick).
+  //   undefined   → same as 'no-data' — used for the first-paint flash
+  //                 before we've learned the reason asynchronously.
+  let body;
+  if (reason === 'no-key') {
+    body = `
+      <h1 class="hero-phrase">Add an AI key in Settings to start generating summaries.</h1>
+      <p class="hero-sub">Your key never leaves this Mac — it's stored locally and queried directly from the daemon. Anthropic, OpenAI, Gemini, or any OpenAI-compatible gateway (OpenRouter, Requesty).</p>`;
+  } else {
+    body = `
+      <h1 class="hero-phrase">Brainloop is still listening. Come back after the next analysis tick — it runs every 30 minutes.</h1>`;
+  }
   root.innerHTML = `
     <section class="hero reveal">
       <div class="hero-eyebrow">Today · ${escapeHtml(shortDateLabel(todayDate))}</div>
-      <h1 class="hero-phrase">Brainloop is still listening. Come back after the next analysis tick — it runs every 30 minutes.</h1>
+      ${body}
     </section>`;
 }
 
@@ -576,9 +592,18 @@ async function loadToday() {
     const summary = await invokeCmd('today_summary');
     if (summary && summary.payload) {
       renderToday(root, summary);
-    } else {
-      renderTodayEmpty(root, todayDate);
+      return;
     }
+    // No summary yet — figure out why so we show the right message.
+    // If no API key is configured, the analyzer is skipping every tick
+    // and will never produce a row; tell the user rather than leaving
+    // them with the generic "still listening" copy.
+    let reason = 'no-data';
+    try {
+      const cfg = await invokeCmd('ai_config_load');
+      if (cfg && !cfg.key_hint) reason = 'no-key';
+    } catch (_) {}
+    renderTodayEmpty(root, todayDate, reason);
   } catch (err) {
     // Surface the failure reason in the empty-state headline so bugs are
     // visible without a devtools console.

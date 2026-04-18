@@ -194,6 +194,13 @@ a { color: inherit; }
   font-style: italic;
   color: var(--monkey);
 }
+.hero-sub {
+  margin-top: 18px;
+  max-width: 52vw;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-60);
+}
 
 /* ── Section headers ────────────────────────────────────────────────── */
 
