@@ -90,15 +90,15 @@ Structure:
   feed", "Twitter home". Bad titles: "Create Home Shorts Subscriptions
   …", "Workflow Credential Project Enterprise Overview …", or any
   sidebar/nav text.
-  `source` is ALWAYS the content platform — "YouTube", "Twitter",
-  "Facebook", "Instagram", "Reddit", "Medium", "Hacker News", "GitHub",
-  "Wikipedia", etc. NEVER a browser or app name ("Comet", "Chrome",
-  "Safari"). Infer the platform from the page_text itself — YouTube
-  pages have "views · # likes", Reddit pages have "r/<sub>", Twitter
-  has "@handle", etc. If you genuinely can't identify a platform for
-  an entry, omit that entry entirely rather than labeling it with the
-  browser name. Only include entries where you're confident about
-  both title and source.
+  `source` is ALWAYS the content platform — NEVER a browser or app
+  name ("Comet", "Chrome", "Safari"). Prefer the `platform` field on
+  the corresponding browser_dwell entry verbatim when it is non-empty
+  — that's derived from the URL and is ground truth. Only fall back to
+  inferring from page_text (YouTube has "views · # likes", Reddit has
+  "r/<sub>", Twitter has "@handle", etc.) when `platform` is empty
+  (typically Comet dwells, which have no browser_url). If after both
+  checks you still can't identify a platform with confidence, omit the
+  entry rather than labeling it with the browser name.
 
 Output strictly valid JSON matching the schema. No prose outside the JSON.
 """

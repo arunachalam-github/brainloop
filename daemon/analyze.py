@@ -151,72 +151,75 @@ _BROWSER_SOURCES = {
     "duckduckgo",
 }
 
-# Platform fingerprints for the sanitizer's fallback labeling: when the LLM
-# emits source=<browser>, try to infer the actual platform by scanning the
-# title + body for these keywords. First match wins, so order matters — put
-# more specific fingerprints before generic ones.
-_PLATFORM_FINGERPRINTS = (
-    # Crunchyroll first — its "simulcast" keyword was being swallowed by a
-    # YouTube rule that also listed simulcast, causing every Crunchyroll
-    # anime page to get mislabeled as YouTube.
-    ("Crunchyroll", ("crunchyroll", "simulcast", "funimation")),
-    ("YouTube",     ("youtube", "shorts subscriptions", "subscriptions library", "watch later")),
-    ("Netflix",     ("netflix",)),
-    ("Twitch",      ("twitch", "streamer")),
-    ("X / Twitter", ("twitter", "tweet", " x ")),
-    ("Reddit",      ("reddit", "r/", "u/")),
-    ("Facebook",    ("facebook", "news feed")),
-    ("Instagram",   ("instagram", "reels")),
-    ("LinkedIn",    ("linkedin",)),
-    ("Hacker News", ("hacker news", "news.ycombinator")),
-    ("GitHub",      ("github.com", "pull request", "commit ")),
-    ("Medium",      ("medium.com", "min read")),
-    ("Wikipedia",   ("wikipedia", "encyclopedia")),
-)
+
+# Only a small nudge: pretty-names for the handful of domains whose display
+# form isn't obvious from the registrable domain ("x.com" → "X / Twitter",
+# "news.ycombinator.com" → "Hacker News"). Everything else gets title-cased
+# automatically — "crunchyroll.com" → "Crunchyroll", "medium.com" → "Medium".
+# Adding new sites is a one-line entry when a user cares.
+_DOMAIN_ALIASES = {
+    "youtube.com":         "YouTube",
+    "youtu.be":            "YouTube",
+    "x.com":               "X / Twitter",
+    "twitter.com":         "X / Twitter",
+    "news.ycombinator.com": "Hacker News",
+    "en.wikipedia.org":    "Wikipedia",
+}
 
 
-def _infer_platform(title: str, haystack: str = "") -> str | None:
-    """Best-effort platform label from the entry's title + any haystack text.
+def _extract_platform(url: str | None) -> str:
+    """Derive a platform label from a URL. Empty string when we have no URL.
 
-    Returns None if nothing matches — caller decides what to do with
-    browser-labeled entries in that case.
+    The result is ground truth (comes from the actual domain), so the LLM
+    doesn't need to guess. For URLs we don't have aliases for, fall through
+    to a title-cased registrable domain — "crunchyroll.com" → "Crunchyroll".
     """
-    blob = f"{title} {haystack}".lower()
-    for platform, needles in _PLATFORM_FINGERPRINTS:
-        if any(n in blob for n in needles):
-            return platform
-    return None
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or "").lower().strip()
+        if host.startswith("www."):
+            host = host[4:]
+        if not host:
+            return ""
+        if host in _DOMAIN_ALIASES:
+            return _DOMAIN_ALIASES[host]
+        # Drop common TLDs for a cleaner display name. "crunchyroll.com" →
+        # "Crunchyroll", "example.co.uk" → "Example" — good enough for the
+        # "things you read" widget; exact strings can be added to the alias
+        # map later if the auto-derivation looks wrong.
+        parts = host.split(".")
+        if len(parts) >= 2:
+            stem = parts[-2]
+        else:
+            stem = parts[0]
+        return stem[:1].upper() + stem[1:] if stem else ""
+    except Exception:
+        return ""
 
 
 def _sanitize_payload(payload: dict) -> None:
-    """Trim widgets the model got wrong. Mutates in place.
+    """Relabel browser-app source values to "Web" as a last-resort fallback.
 
-    For `things_read`: if `source` looks like a browser app name ("Comet",
-    "Chrome", ...), try to relabel it with an inferred platform from the
-    entry's title. Only drop an entry if inference also fails — better to
-    show "Yennai Arindhal scenes · YouTube" than nothing at all when the
-    model was timid about naming the platform.
+    Platform identification is now handled upstream in build_context (which
+    extracts a `platform` from each dwell's browser_url and hands it to the
+    LLM). The LLM should emit that platform directly in `source`. If it
+    still falls back to the browser app name (because the dwell had no URL
+    — e.g. Comet — and page_text didn't make the platform obvious), we
+    degrade to "Web" rather than keep lying about which app was used.
     """
     try:
         items = payload.get("widgets", {}).get("things_read") or []
     except AttributeError:
         return
-    cleaned: list[dict] = []
     for it in items:
         if not isinstance(it, dict):
             continue
         src = (it.get("source") or "").strip()
         if src.lower() in _BROWSER_SOURCES:
-            inferred = _infer_platform(it.get("title") or "")
-            if inferred:
-                it["source"] = inferred
-            else:
-                # No platform signal at all — keep it with a neutral "Web"
-                # label rather than dropping; the user can still see they
-                # spent time reading something.
-                it["source"] = "Web"
-        cleaned.append(it)
-    payload["widgets"]["things_read"] = cleaned
+            it["source"] = "Web"
+    payload["widgets"]["things_read"] = items
 
 
 # ── Context builder (pure aggregation, no LLM) ────────────────────────────────
@@ -405,6 +408,11 @@ def _extract_browser_dwells(rows: list) -> list[dict]:
             d["page_text"] = raw[:half] + " … " + raw[-half:]
         d.pop("_sig", None)
         d["duration_min"] = d["duration_sec"] // 60
+        # Derive the platform from the URL when we have one — this is ground
+        # truth (the domain says what site it is), so the LLM doesn't have
+        # to guess from body text. Empty string for Comet / any row whose
+        # browser_url is null; the LLM falls back to page_text inference.
+        d["platform"] = _extract_platform(d.get("browser_url"))
     return dwells
 
 
