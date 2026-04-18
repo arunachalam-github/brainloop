@@ -211,13 +211,115 @@ fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
     Ok(BucketApps { apps, total_rows })
 }
 
+#[derive(Serialize)]
+struct AiConfig {
+    provider: String,
+    model: String,
+    base_url: String,
+    // key_hint is a non-sensitive "is one set + last 4" display — never the raw key.
+    key_hint: String,
+}
+
+/// Read the AI provider config from `app_config`. Returns a minimal default
+/// when no row is present yet so the UI can still show a usable form.
+#[tauri::command]
+fn ai_config_load() -> Result<AiConfig, String> {
+    let mut cfg = AiConfig {
+        provider: "anthropic".into(),
+        model: "claude-sonnet-4-5".into(),
+        base_url: "https://api.anthropic.com".into(),
+        key_hint: "".into(),
+    };
+    let path = db_path();
+    if !path.exists() {
+        return Ok(cfg);
+    }
+    let conn = open_read_only()?;
+    let has_table: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_config'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if has_table == 0 {
+        return Ok(cfg);
+    }
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM app_config")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    for kv in rows.filter_map(|r| r.ok()) {
+        match kv.0.as_str() {
+            "ai_provider" => cfg.provider = kv.1,
+            "ai_model" => cfg.model = kv.1,
+            "ai_base_url" => cfg.base_url = kv.1,
+            "ai_api_key" => {
+                if !kv.1.is_empty() {
+                    let tail: String = kv.1.chars().rev().take(4).collect::<String>().chars().rev().collect();
+                    cfg.key_hint = format!("••• {}", tail);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(cfg)
+}
+
+/// Persist the AI provider config. `api_key` is optional — if empty, keep
+/// whatever key is already stored. The daemon reads these values on its next
+/// analyzer tick.
+#[tauri::command]
+fn ai_config_save(
+    provider: String,
+    model: String,
+    base_url: String,
+    api_key: String,
+) -> Result<(), String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err(format!(
+            "database not found at {} — is the daemon installed?",
+            path.display()
+        ));
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let mut upsert = |k: &str, v: &str| -> Result<(), String> {
+        tx.execute(
+            "INSERT INTO app_config(key,value) VALUES(?1,?2)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [k, v],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    };
+    upsert("ai_provider", &provider)?;
+    upsert("ai_model", &model)?;
+    upsert("ai_base_url", &base_url)?;
+    if !api_key.is_empty() {
+        upsert("ai_api_key", &api_key)?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             row_count,
             today_summary,
             daemon_status,
-            bucket_apps
+            bucket_apps,
+            ai_config_load,
+            ai_config_save
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -63,9 +63,13 @@ def tick(conn: sqlite3.Connection, now_ts: float | None = None, force: bool = Fa
     if not cfg:
         log.debug("analyzer skip: ai config not set in app_config")
         return
-    api_key = _load_api_key(cfg.get("ai_key_ref") or cfg.get("ai_provider") or "")
+    # Key resolution: prefer the value saved from Settings UI into app_config.
+    # Fall back to Keychain for users who configured via `security add-generic-password`.
+    api_key = cfg.get("ai_api_key") or _load_api_key(
+        cfg.get("ai_key_ref") or cfg.get("ai_provider") or ""
+    )
     if not api_key:
-        log.debug("analyzer skip: api key not in Keychain (service=%s)", ANALYZER_KEYCHAIN_SERVICE)
+        log.debug("analyzer skip: no api key in app_config or Keychain")
         return
 
     # Gate 2: don't regenerate too often (skipped under --force).

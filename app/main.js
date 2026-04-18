@@ -624,21 +624,26 @@ function wireChat() {
 }
 
 // ─── Settings wiring ─────────────────────────────────────────────────
+// Presets are just defaults for model + base URL per provider — all fields
+// remain editable, which is how the user can point "OpenAI" at OpenRouter /
+// Requesty / any other OpenAI-compatible gateway.
 const PROVIDER_PRESETS = {
   anthropic: { label: 'Anthropic', model: 'claude-sonnet-4-5',  baseUrl: 'https://api.anthropic.com' },
-  openai:    { label: 'OpenAI',    model: 'gpt-4o',             baseUrl: 'https://api.openai.com/v1' },
-  gemini:    { label: 'Gemini',    model: 'gemini-2.0-flash',   baseUrl: 'https://generativelanguage.googleapis.com' },
+  openai:    { label: 'OpenAI',    model: 'gpt-4o-mini',        baseUrl: 'https://api.openai.com/v1' },
+  gemini:    { label: 'Gemini',    model: 'gemini-2.5-flash',   baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
 };
 
-function wireSettings() {
+async function wireSettings() {
   const tabs = document.querySelectorAll('.provider-tab');
   const apiKey  = document.getElementById('set-api-key');
   const modelEl = document.getElementById('set-model');
   const baseEl  = document.getElementById('set-base-url');
+  const saveBtn = document.getElementById('btn-save-ai');
+  const statusEl = document.getElementById('ai-save-status');
 
   const state = { provider: 'anthropic' };
 
-  function applyProvider(p) {
+  function applyPreset(p) {
     state.provider = p;
     const preset = PROVIDER_PRESETS[p];
     if (!preset) return;
@@ -648,8 +653,65 @@ function wireSettings() {
     if (baseEl)  baseEl.value  = preset.baseUrl;
   }
 
-  tabs.forEach(t => t.addEventListener('click', () => applyProvider(t.dataset.provider)));
-  applyProvider('anthropic');
+  // Tab click: swap in that provider's preset. The user can still edit any
+  // field after — especially base_url, which is how OpenRouter / Requesty
+  // work (pick "OpenAI" and paste the gateway URL).
+  tabs.forEach(t => t.addEventListener('click', () => applyPreset(t.dataset.provider)));
+
+  // Load whatever is currently saved so the form reflects reality, not
+  // defaults. Falls back to Anthropic preset if the DB has nothing yet.
+  applyPreset('anthropic');
+  try {
+    const existing = await invokeCmd('ai_config_load');
+    if (existing) {
+      state.provider = existing.provider || 'anthropic';
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.provider === state.provider));
+      const preset = PROVIDER_PRESETS[state.provider] || PROVIDER_PRESETS.anthropic;
+      if (apiKey)  apiKey.placeholder = existing.key_hint
+                                        ? `${existing.key_hint}  (leave blank to keep)`
+                                        : `sk-…  (${preset.label} key)`;
+      if (modelEl) modelEl.value = existing.model    || preset.model;
+      if (baseEl)  baseEl.value  = existing.base_url || preset.baseUrl;
+    }
+  } catch (e) {
+    console.warn('ai_config_load failed', e);
+  }
+
+  // Save: write provider/model/base_url into app_config, plus the key only
+  // when a new one is entered. Empty key = keep the old one (so users can
+  // re-save model/base URL edits without re-pasting the key each time).
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      if (statusEl) { statusEl.textContent = 'Saving…'; statusEl.className = 'ai-save-status'; }
+      try {
+        await invokeCmd('ai_config_save', {
+          provider: state.provider,
+          model:    (modelEl?.value || '').trim(),
+          baseUrl:  (baseEl?.value  || '').trim(),
+          apiKey:   (apiKey?.value  || '').trim(),
+        });
+        if (apiKey) apiKey.value = '';  // don't leave the plaintext key sitting in the DOM
+        if (statusEl) {
+          statusEl.textContent = 'Saved. Next analyzer tick will use the new settings.';
+          statusEl.className = 'ai-save-status ok';
+        }
+        // Re-load so the placeholder reflects the newly-saved key.
+        try {
+          const fresh = await invokeCmd('ai_config_load');
+          if (fresh && apiKey) {
+            apiKey.placeholder = fresh.key_hint
+              ? `${fresh.key_hint}  (leave blank to keep)`
+              : apiKey.placeholder;
+          }
+        } catch (_) {}
+      } catch (e) {
+        if (statusEl) {
+          statusEl.textContent = `Save failed: ${e}`;
+          statusEl.className = 'ai-save-status err';
+        }
+      }
+    });
+  }
 
   const exp = document.getElementById('btn-export-today');
   const del = document.getElementById('btn-delete-all');
