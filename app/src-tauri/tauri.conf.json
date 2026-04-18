@@ -2,9 +2,9 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Brainloop",
   "version": "0.1.0",
-  "identifier": "com.brainloop.app",
+  "identifier": "com.brainloop.desktop",
   "build": {
-    "frontendDist": "../"
+    "frontendDist": "../web"
   },
   "app": {
     "windows": [

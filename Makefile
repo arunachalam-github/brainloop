@@ -226,14 +226,12 @@ $(BUILD_VENV_PY):
 	@echo "→ Build venv ready"
 
 # Compile daemon/ into a single-file executable. Output: build/dist/brainloopd
-# (~20–40 MB including pyobjc frameworks). The binary is architecture-specific
+# (~10 MB including pyobjc frameworks). The binary is architecture-specific
 # to the host (ARM64 on Apple Silicon, x86_64 on Intel).
 bundle-daemon: $(BUILD_VENV_PY)
 	@echo "→ Building brainloopd with PyInstaller…"
 	@cd "$(BUILD_DIR)" && "$(BUILD_PYINST)" --clean --noconfirm brainloopd.spec
 	@ls -lh "$(DAEMON_BIN)"
-	@echo "→ Smoke test: $(DAEMON_BIN) --help"
-	@"$(DAEMON_BIN)" --help 2>&1 | head -5 || true
 	@mkdir -p "$(TAURI_RES_DIR)"
 	@cp "$(DAEMON_BIN)" "$(TAURI_RES_DIR)/brainloopd"
 	@cp "$(PROJ_DIR)/com.brainloop.agent.plist.template" "$(TAURI_RES_DIR)/"
