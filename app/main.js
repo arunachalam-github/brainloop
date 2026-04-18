@@ -426,15 +426,15 @@ function renderToday(root, summary) {
 
 function renderAct(act, idx) {
   const callouts = Array.isArray(act.callouts) ? act.callouts : [];
-  const monkey = callouts.find(c => /gratification\s*monkey/i.test(c.label || ''));
-  const monkeyHtml = monkey ? `
+  const monkeys = callouts.filter(c => /gratification\s*monkey/i.test(c.label || ''));
+  const monkeysHtml = monkeys.map(monkey => `
     <div class="monkey">
       <div class="monkey-header">
         <span class="monkey-name">Gratification Monkey</span>
         <span class="monkey-meta">${escapeHtml(monkey.time || '')}${monkey.duration_min != null ? ' · ' + escapeHtml(monkey.duration_min) + ' min' : ''}</span>
       </div>
       <div class="monkey-sentence">${escapeHtml(monkey.body || '')}</div>
-    </div>` : '';
+    </div>`).join('');
 
   return `
     <div class="period">
@@ -447,7 +447,7 @@ function renderAct(act, idx) {
         <div class="period-line1">${escapeHtml(act.one_liner || '')}</div>
         <div class="period-line2">${escapeHtml(act.narrative || '')}</div>
       </div>
-      ${monkeyHtml}
+      ${monkeysHtml}
     </div>`;
 }
 

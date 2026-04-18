@@ -48,8 +48,12 @@ log = logging.getLogger("brainloop.analyze")
 
 # ── Public entry point (called by the daemon's timer) ─────────────────────────
 
-def tick(conn: sqlite3.Connection, now_ts: float | None = None) -> None:
-    """One scheduled pass. Silent on missing config, idle days, or network errors."""
+def tick(conn: sqlite3.Connection, now_ts: float | None = None, force: bool = False) -> None:
+    """One scheduled pass. Silent on missing config, idle days, or network errors.
+
+    `force=True` bypasses the min-regen and new-row gates (useful from the CLI
+    when iterating on prompts). Config/key gates are always enforced.
+    """
     now_ts = now_ts or time.time()
     local_tz = _local_tz()
     today = datetime.fromtimestamp(now_ts, tz=local_tz).strftime("%Y-%m-%d")
@@ -64,11 +68,11 @@ def tick(conn: sqlite3.Connection, now_ts: float | None = None) -> None:
         log.debug("analyzer skip: api key not in Keychain (service=%s)", ANALYZER_KEYCHAIN_SERVICE)
         return
 
-    # Gate 2: don't regenerate too often.
+    # Gate 2: don't regenerate too often (skipped under --force).
     prev = conn.execute(
         "SELECT generated_at FROM day_summary WHERE date = ?", (today,)
     ).fetchone()
-    if prev and (now_ts - prev[0]) < ANALYZER_MIN_REGEN_SECS:
+    if not force and prev and (now_ts - prev[0]) < ANALYZER_MIN_REGEN_SECS:
         log.debug("analyzer skip: regenerated %ds ago", int(now_ts - prev[0]))
         return
 
@@ -79,8 +83,8 @@ def tick(conn: sqlite3.Connection, now_ts: float | None = None) -> None:
         log.debug("analyzer skip: no activity for %d min", int((now_ts - last_ts) / 60))
         return
 
-    # Gate 4: require at least one new row since the previous run.
-    if prev:
+    # Gate 4: require at least one new row since the previous run (skipped under --force).
+    if not force and prev:
         new_rows = conn.execute(
             "SELECT COUNT(*) FROM activity_log WHERE ts >= ?", (prev[0],)
         ).fetchone()[0]
@@ -453,6 +457,7 @@ def _local_tz() -> ZoneInfo:
 def _main() -> int:
     p = argparse.ArgumentParser(description="Brainloop day-summary analyzer")
     p.add_argument("--once", action="store_true", help="run exactly one tick and exit")
+    p.add_argument("--force", action="store_true", help="bypass min-regen + new-row gates (dev)")
     args = p.parse_args()
 
     logging.basicConfig(
@@ -465,7 +470,7 @@ def _main() -> int:
 
     conn = sqlite3.connect(str(DB_PATH))
     try:
-        tick(conn)
+        tick(conn, force=args.force)
     finally:
         conn.close()
     return 0
