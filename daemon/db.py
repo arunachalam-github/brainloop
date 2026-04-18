@@ -55,6 +55,30 @@ def open_db() -> sqlite3.Connection:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ts       ON activity_log(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_app_name ON activity_log(app_name)")
+
+    # day_summary: one row per local-date, overwritten in place as the day progresses.
+    # payload_json holds the full structured summary consumed by the UI.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS day_summary (
+            date          TEXT PRIMARY KEY,
+            generated_at  INTEGER NOT NULL,
+            model         TEXT    NOT NULL,
+            activity_rows INTEGER NOT NULL,
+            payload_json  TEXT    NOT NULL,
+            tokens_in     INTEGER,
+            tokens_out    INTEGER
+        )
+    """)
+
+    # app_config: key/value settings written by the UI, read by the daemon.
+    # Holds ai_provider, ai_model, ai_base_url, ai_key_ref (Keychain lookup).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_config (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
     # Migrations: add columns added after initial schema
     for col_def in (
         "page_text TEXT",
