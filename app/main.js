@@ -62,15 +62,28 @@ function timeFromSecs(s) {
 }
 
 // ─── Tauri-safe invoke wrapper ───────────────────────────────────────
-// `window.__TAURI__` only exists inside the Tauri shell. In a plain file://
-// browser preview we fall back to a resolved null/error so the UI shows the
-// empty state rather than exploding.
+// `window.__TAURI__` is injected asynchronously — it's NOT guaranteed to be
+// present at DOMContentLoaded. Poll briefly for the bridge so our first
+// invoke doesn't fail in a race condition. In a plain file:// browser
+// preview the bridge will never arrive and we bail cleanly.
+async function waitForTauriBridge(timeoutMs = 3000) {
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    const t = window.__TAURI__;
+    if (t && t.core && typeof t.core.invoke === 'function') return t;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return null;
+}
+
 async function invokeCmd(name, args) {
+  const tauri = await waitForTauriBridge();
+  if (!tauri) {
+    const err = new Error('tauri-not-available');
+    console.warn(`[invoke ${name}] bridge never appeared`);
+    throw err;
+  }
   try {
-    const tauri = window.__TAURI__;
-    if (!tauri || !tauri.core || typeof tauri.core.invoke !== 'function') {
-      throw new Error('tauri-not-available');
-    }
     return await tauri.core.invoke(name, args);
   } catch (err) {
     console.warn(`[invoke ${name}] failed:`, err);

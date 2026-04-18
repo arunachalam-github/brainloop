@@ -11,9 +11,9 @@
     <div class="topbar">
       <div class="wordmark"><span class="glyph"></span>brainloop</div>
       <div class="tabs" id="tab-bar">
-        <button class="tab active" data-tab="today">Today</button>
-        <button class="tab" data-tab="chat">Chat</button>
-        <button class="tab" data-tab="settings">Settings</button>
+        <button type="button" class="tab active" data-tab="today">Today</button>
+        <button type="button" class="tab" data-tab="chat">Chat</button>
+        <button type="button" class="tab" data-tab="settings">Settings</button>
       </div>
       <div class="meta" id="meta-date">—</div>
     </div>
@@ -37,15 +37,15 @@
             <div class="chat-msg bot">Hi. I can tell you about your day — what you worked on, where the monkey took over, when you actually rested. What do you want to know?</div>
           </div>
           <div class="chat-suggestions" id="chat-suggestions">
-            <button class="chat-suggestion">Summarize my day</button>
-            <button class="chat-suggestion">What did the monkey do today?</button>
-            <button class="chat-suggestion">Was my morning productive?</button>
-            <button class="chat-suggestion">When did I take breaks?</button>
-            <button class="chat-suggestion">What was I reading?</button>
+            <button type="button" class="chat-suggestion">Summarize my day</button>
+            <button type="button" class="chat-suggestion">What did the monkey do today?</button>
+            <button type="button" class="chat-suggestion">Was my morning productive?</button>
+            <button type="button" class="chat-suggestion">When did I take breaks?</button>
+            <button type="button" class="chat-suggestion">What was I reading?</button>
           </div>
           <div class="chat-input">
             <input id="chat-input" placeholder="Ask about your day…" />
-            <button class="chat-send" id="chat-send" aria-label="Send">
+            <button type="button" class="chat-send" id="chat-send" aria-label="Send">
               <svg viewBox="0 0 16 16" fill="none"><path d="M2 8l12-6-4 14-2-6-6-2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
             </button>
           </div>
@@ -64,9 +64,9 @@
             <div class="set-title">AI provider</div>
             <div class="set-desc">Bring your own key. We never see it — queries go straight from your Mac to the provider you pick.</div>
             <div class="provider-tabs" id="provider-tabs">
-              <button class="provider-tab active" data-provider="anthropic">Anthropic</button>
-              <button class="provider-tab" data-provider="openai">OpenAI</button>
-              <button class="provider-tab" data-provider="gemini">Gemini</button>
+              <button type="button" class="provider-tab active" data-provider="anthropic">Anthropic</button>
+              <button type="button" class="provider-tab" data-provider="openai">OpenAI</button>
+              <button type="button" class="provider-tab" data-provider="gemini">Gemini</button>
             </div>
             <div class="set-field">
               <label>API key</label>
@@ -116,8 +116,8 @@
               <input readonly value="~/Library/Application Support/brainloop/activity.db" />
             </div>
             <div class="data-actions">
-              <button class="data-action" id="btn-export-today">Export today</button>
-              <button class="data-action danger" id="btn-delete-all">Delete all data</button>
+              <button type="button" class="data-action" id="btn-export-today">Export today</button>
+              <button type="button" class="data-action danger" id="btn-delete-all">Delete all data</button>
             </div>
           </div>
 
