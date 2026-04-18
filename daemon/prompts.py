@@ -89,8 +89,12 @@ PAYLOAD_SCHEMA = {
             "widgets",
         ],
         "properties": {
-            "headline": {"type": "string"},
-            "subtitle": {"type": "string"},
+            # Length caps on every string: Gemini 2.5 has been observed to
+            # fall into "\n\n\n…" repetition loops inside JSON strings,
+            # burning the entire output budget on whitespace. maxLength
+            # forces the decoder to close the string before that happens.
+            "headline": {"type": "string", "maxLength": 280},
+            "subtitle": {"type": "string", "maxLength": 120},
             "switches_total": {"type": "integer"},
             "activity_state": {
                 "type": "string",
@@ -126,10 +130,10 @@ PAYLOAD_SCHEMA = {
                         "callouts",
                     ],
                     "properties": {
-                        "title": {"type": "string"},
-                        "time_range": {"type": "string"},
-                        "one_liner": {"type": "string"},
-                        "narrative": {"type": "string"},
+                        "title": {"type": "string", "maxLength": 40},
+                        "time_range": {"type": "string", "maxLength": 30},
+                        "one_liner": {"type": "string", "maxLength": 200},
+                        "narrative": {"type": "string", "maxLength": 400},
                         "callouts": {
                             "type": "array",
                             "items": {
@@ -142,10 +146,10 @@ PAYLOAD_SCHEMA = {
                                     "body",
                                 ],
                                 "properties": {
-                                    "label": {"type": "string"},
-                                    "time": {"type": "string"},
+                                    "label": {"type": "string", "maxLength": 40},
+                                    "time": {"type": "string", "maxLength": 10},
                                     "duration_min": {"type": "integer"},
-                                    "body": {"type": "string"},
+                                    "body": {"type": "string", "maxLength": 600},
                                 },
                             },
                         },
@@ -171,8 +175,8 @@ PAYLOAD_SCHEMA = {
                         "required": ["minutes", "label", "range"],
                         "properties": {
                             "minutes": {"type": "integer"},
-                            "label": {"type": "string"},
-                            "range": {"type": "string"},
+                            "label": {"type": "string", "maxLength": 80},
+                            "range": {"type": "string", "maxLength": 30},
                         },
                     },
                     "doom_scroll": {
@@ -181,8 +185,8 @@ PAYLOAD_SCHEMA = {
                         "required": ["minutes", "detail", "worst_range"],
                         "properties": {
                             "minutes": {"type": "integer"},
-                            "detail": {"type": "string"},
-                            "worst_range": {"type": "string"},
+                            "detail": {"type": "string", "maxLength": 300},
+                            "worst_range": {"type": "string", "maxLength": 30},
                         },
                     },
                     "hours_by_app": {
@@ -192,7 +196,7 @@ PAYLOAD_SCHEMA = {
                             "additionalProperties": False,
                             "required": ["app", "minutes"],
                             "properties": {
-                                "app": {"type": "string"},
+                                "app": {"type": "string", "maxLength": 60},
                                 "minutes": {"type": "integer"},
                             },
                         },
@@ -212,7 +216,7 @@ PAYLOAD_SCHEMA = {
                         "required": ["minutes", "detail", "sessions"],
                         "properties": {
                             "minutes": {"type": "integer"},
-                            "detail": {"type": "string"},
+                            "detail": {"type": "string", "maxLength": 200},
                             "sessions": {"type": "integer"},
                         },
                     },
@@ -223,8 +227,8 @@ PAYLOAD_SCHEMA = {
                             "additionalProperties": False,
                             "required": ["start", "end", "minutes"],
                             "properties": {
-                                "start": {"type": "string"},
-                                "end": {"type": "string"},
+                                "start": {"type": "string", "maxLength": 10},
+                                "end":   {"type": "string", "maxLength": 10},
                                 "minutes": {"type": "integer"},
                             },
                         },
@@ -236,9 +240,9 @@ PAYLOAD_SCHEMA = {
                             "additionalProperties": False,
                             "required": ["time", "title", "source"],
                             "properties": {
-                                "time": {"type": "string"},
-                                "title": {"type": "string"},
-                                "source": {"type": "string"},
+                                "time":   {"type": "string", "maxLength": 10},
+                                "title":  {"type": "string", "maxLength": 120},
+                                "source": {"type": "string", "maxLength": 40},
                             },
                         },
                     },
