@@ -351,35 +351,87 @@ def _extract_calls_media(rows: list) -> list[dict]:
     return [w for w in out if w["duration_min"] >= 1]
 
 
+_MAX_BREAK_MIN = 90  # longer gaps are sleep / away-all-afternoon, not a workday break
+
+
+def _find_wake_ts(rows: list) -> float:
+    """Timestamp of the user's real wake-up transition for the day.
+
+    Specifically: the first non-loginwindow row that comes out of a
+    loginwindow stretch of at least 30 minutes. That's the signature of
+    a genuine sleep→wake transition — distinct from a short lock during
+    a single working session. Treating "first non-loginwindow row"
+    naively as wake breaks when the user was active just after midnight
+    and then slept until late morning; the stretch-check rules that out.
+
+    Falls back to the first non-loginwindow row if no long lock is seen
+    (e.g. the user just started fresh this morning with no pre-midnight
+    session). Returns infinity if the laptop stayed locked all day.
+    """
+    long_lock_secs = 30 * 60
+    first_unlocked: float | None = None
+    lock_start: float | None = None
+
+    for ts, _trigger, app_name, *_rest in rows:
+        if app_name == "loginwindow":
+            if lock_start is None:
+                lock_start = ts
+            continue
+        if first_unlocked is None:
+            first_unlocked = ts
+        if lock_start is not None and ts - lock_start >= long_lock_secs:
+            return ts
+        lock_start = None
+
+    return first_unlocked if first_unlocked is not None else float("inf")
+
+
 def _extract_breaks(rows: list, tz: ZoneInfo) -> list[dict]:
+    if not rows:
+        return []
+
+    wake_ts = _find_wake_ts(rows)
     out: list[dict] = []
+
+    def maybe_append(start_ts: float, end_ts: float, kind: str) -> None:
+        if start_ts < wake_ts:
+            return
+        minutes = int((end_ts - start_ts) // 60)
+        if minutes < 5 or minutes > _MAX_BREAK_MIN:
+            return
+        out.append({
+            "start": datetime.fromtimestamp(start_ts, tz=tz).strftime("%H:%M"),
+            "end":   datetime.fromtimestamp(end_ts,   tz=tz).strftime("%H:%M"),
+            "minutes": minutes,
+            "kind": kind,
+        })
+
     gap_threshold = 5 * 60
     for i in range(1, len(rows)):
         dt = rows[i][0] - rows[i - 1][0]
         if dt >= gap_threshold:
-            out.append({
-                "start": datetime.fromtimestamp(rows[i - 1][0], tz=tz).strftime("%H:%M"),
-                "end":   datetime.fromtimestamp(rows[i][0],     tz=tz).strftime("%H:%M"),
-                "minutes": int(dt // 60),
-                "kind": "idle_gap",
-            })
+            maybe_append(rows[i - 1][0], rows[i][0], "idle_gap")
+
     # loginwindow stretches
     run_start = None
+    last = None
     for r in rows:
         if r[2] == "loginwindow":
             if run_start is None:
                 run_start = r[0]
             last = r[0]
         else:
-            if run_start is not None and last - run_start >= 60:
-                out.append({
-                    "start": datetime.fromtimestamp(run_start, tz=tz).strftime("%H:%M"),
-                    "end":   datetime.fromtimestamp(last, tz=tz).strftime("%H:%M"),
-                    "minutes": int((last - run_start) // 60),
-                    "kind": "screen_lock",
-                })
+            if run_start is not None and last is not None and last - run_start >= 60:
+                maybe_append(run_start, last, "screen_lock")
             run_start = None
-    return out
+    if run_start is not None and last is not None and last - run_start >= 60:
+        maybe_append(run_start, last, "screen_lock")
+
+    # A loginwindow stretch also registers as an idle_gap from the row-
+    # gap scan above. Prefer the more informative screen_lock label when
+    # both describe the same window.
+    locks = {(b["start"], b["end"]) for b in out if b["kind"] == "screen_lock"}
+    return [b for b in out if not (b["kind"] == "idle_gap" and (b["start"], b["end"]) in locks)]
 
 
 def _extract_ai_waits(heartbeat_rows: list, tz: ZoneInfo) -> list[dict]:
