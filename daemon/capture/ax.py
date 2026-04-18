@@ -109,13 +109,28 @@ def _find_url(element, depth: int) -> str | None:
 # ── Browser page text (AppleScript JS injection) ──────────────────────────────
 
 # AppleScript-compatible app names for each supported browser bundle ID.
-# Firefox is excluded — it does not support AppleScript JS execution.
+# Only browsers that implement Chrome/Safari-style `execute javascript` are
+# listed here. Firefox (and its forks), Opera, and DuckDuckGo are intentionally
+# omitted — they capture URLs but not page_text.
 _APPLESCRIPT_APP_NAMES: dict[str, str] = {
-    "com.google.Chrome":           "Google Chrome",
-    "com.apple.Safari":            "Safari",
-    "com.brave.Browser":           "Brave Browser",
-    "com.microsoft.edgemac":       "Microsoft Edge",
-    "company.thebrowser.Browser":  "Arc",
+    # Mainstream
+    "com.google.Chrome":                   "Google Chrome",
+    "com.apple.Safari":                    "Safari",
+    "com.brave.Browser":                   "Brave Browser",
+    "com.microsoft.edgemac":               "Microsoft Edge",
+    "company.thebrowser.Browser":          "Arc",
+    # AI / alt Chromium forks
+    "ai.perplexity.comet":                 "Comet",
+    "com.vivaldi.Vivaldi":                 "Vivaldi",
+    "org.chromium.Chromium":               "Chromium",
+    # Pre-release channels
+    "com.google.Chrome.canary":            "Google Chrome Canary",
+    "com.google.Chrome.beta":              "Google Chrome Beta",
+    "com.google.Chrome.dev":               "Google Chrome Dev",
+    "com.apple.SafariTechnologyPreview":   "Safari Technology Preview",
+    "com.microsoft.edgemac.Beta":          "Microsoft Edge Beta",
+    "com.microsoft.edgemac.Dev":           "Microsoft Edge Dev",
+    "com.microsoft.edgemac.Canary":        "Microsoft Edge Canary",
 }
 
 
