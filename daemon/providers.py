@@ -27,8 +27,8 @@ import urllib.error
 
 log = logging.getLogger("brainloop.providers")
 
-_TIMEOUT_SECS = 60
-_MAX_OUTPUT_TOKENS = 4096
+_TIMEOUT_SECS = 120
+_MAX_OUTPUT_TOKENS = 16384   # Gemini 2.5 thinks before answering; budget generously.
 
 
 class LLMError(Exception):
@@ -79,6 +79,12 @@ def _call_openai_compat(
             "json_schema": {"name": schema["name"], "schema": schema["schema"], "strict": True},
         },
     }
+    # Gemini 2.5 reasoning models silently consume the output budget on
+    # internal thinking before producing the JSON. Ask them to spend as little
+    # thinking as they can justify. Harmless on non-Gemini endpoints that
+    # ignore the field.
+    if "googleapis.com" in base_url or "gemini" in model.lower():
+        body["reasoning_effort"] = "low"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -94,7 +100,11 @@ def _call_openai_compat(
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as e:
-        raise LLMError(f"invalid JSON in content: {e}; content={content[:500]}") from e
+        finish = choices[0].get("finish_reason")
+        raise LLMError(
+            f"invalid JSON in content (finish_reason={finish}, content_len={len(content)}): {e}; "
+            f"content[head]={content[:400]} ... content[tail]={content[-400:]}"
+        ) from e
 
     usage = data.get("usage") or {}
     return payload, int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
