@@ -411,8 +411,14 @@ async function loadToday() {
     } else {
       renderTodayEmpty(root, todayDate);
     }
-  } catch (_e) {
-    renderTodayEmpty(root, todayDate);
+  } catch (err) {
+    // Surface the failure reason in the empty-state headline so bugs are
+    // visible without a devtools console.
+    root.innerHTML = `
+      <section class="hero reveal">
+        <div class="hero-eyebrow">Today · ${escapeHtml(shortDateLabel(todayDate))}</div>
+        <h1 class="hero-phrase">Couldn't read today's summary. ${escapeHtml(String(err && err.message ? err.message : err))}</h1>
+      </section>`;
   }
 }
 
