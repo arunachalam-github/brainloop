@@ -222,14 +222,21 @@ struct PermissionsStatus {
 
 /// Best-effort Accessibility detection for the daemon.
 ///
-/// We don't call AXIsProcessTrusted() directly — TCC grants are per-binary
-/// and the UI and daemon are different binaries, so the UI's self-check
-/// wouldn't tell us anything about the daemon. Instead we read capture
-/// behavior from the DB: the last 50 heartbeat rows. If any of them have
-/// a non-empty window_title AND a non-loginwindow app_name, the AX APIs
-/// are returning data → granted. If app_name is set but window_title is
-/// always NULL, AX is blocked (NSWorkspace still works without AX, so we
-/// see the app name but not the window title).
+/// We don't call AXIsProcessTrusted() directly — TCC grants are per-binary,
+/// and the UI and daemon are different binaries, so a UI self-check would
+/// lie. Instead we look at capture behavior over the LAST 10 heartbeat
+/// rows (~10 min). For each row we know whether window_title was captured.
+/// A majority rule shakes off stale rows from a freshly-revoked grant:
+///
+///   - ≥ 4/10 non-loginwindow rows with a populated window_title → granted.
+///     (Threshold < 50% so a quick grant while the user is mid-app-switch
+///     still flips green.)
+///   - ≥ 4/10 non-loginwindow rows with no title          → not_granted.
+///   - too few non-loginwindow rows (locked screen, etc.) → unknown.
+///
+/// If the user revokes AX, old titled rows still sit in the DB, but within
+/// ~5-10 minutes the new null-title heartbeats outnumber them and the
+/// badge flips. Same behavior on grant — new titles quickly dominate.
 #[tauri::command]
 fn permissions_status() -> Result<PermissionsStatus, String> {
     let mut out = PermissionsStatus {
@@ -246,7 +253,7 @@ fn permissions_status() -> Result<PermissionsStatus, String> {
         .prepare(
             "SELECT window_title, app_name FROM activity_log
              WHERE trigger = 'heartbeat'
-             ORDER BY ts DESC LIMIT 50",
+             ORDER BY ts DESC LIMIT 10",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -257,24 +264,33 @@ fn permissions_status() -> Result<PermissionsStatus, String> {
             ))
         })
         .map_err(|e| e.to_string())?;
-    let mut saw_title = false;
-    let mut saw_non_login = false;
-    let mut total = 0;
+
+    let mut non_login_with_title = 0;
+    let mut non_login_without_title = 0;
     for r in rows.filter_map(|r| r.ok()) {
-        total += 1;
         let (title, app) = r;
-        if title.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
-            saw_title = true;
+        let is_user_app = app
+            .as_deref()
+            .map(|s| !s.is_empty() && s != "loginwindow")
+            .unwrap_or(false);
+        if !is_user_app {
+            continue;
         }
-        if app.as_deref().map(|s| s != "loginwindow").unwrap_or(false) {
-            saw_non_login = true;
+        let has_title = title
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        if has_title {
+            non_login_with_title += 1;
+        } else {
+            non_login_without_title += 1;
         }
     }
-    out.accessibility = if total == 0 {
-        "unknown".into()
-    } else if saw_title && saw_non_login {
+
+    const THRESHOLD: u32 = 4; // out of 10
+    out.accessibility = if non_login_with_title >= THRESHOLD {
         "granted".into()
-    } else if saw_non_login {
+    } else if non_login_without_title >= THRESHOLD {
         "not_granted".into()
     } else {
         "unknown".into()
