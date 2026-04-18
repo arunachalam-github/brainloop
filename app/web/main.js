@@ -742,6 +742,60 @@ async function wireSettings() {
   const del = document.getElementById('btn-delete-all');
   if (exp) exp.addEventListener('click', () => alert('Export today — coming soon.'));
   if (del) del.addEventListener('click', () => alert('Delete all data — coming soon.'));
+
+  wirePermissions();
+}
+
+// ─── Permissions row wiring ───────────────────────────────────────────
+//
+// The Rust side (`permissions_status`) inspects recent activity_log rows
+// and decides each permission's state from capture behavior rather than
+// calling AX APIs directly — TCC grants are per-binary, and the daemon
+// + UI are different binaries, so asking "does the UI have AX?" wouldn't
+// tell us anything useful. See main.rs for the heuristic.
+function paintPermissions(status) {
+  const mapState = (v) => {
+    if (v === 'granted')      return { cls: 'ok',      text: 'granted' };
+    if (v === 'not_granted')  return { cls: 'err',     text: 'not granted' };
+    return                           { cls: 'unknown', text: 'unknown' };
+  };
+  document.querySelectorAll('.perm-row[data-perm]').forEach(row => {
+    const key = row.dataset.perm;
+    const val = status?.[key];
+    if (!val) return;
+    const badge = row.querySelector('[data-role="badge"]');
+    if (!badge) return;
+    const { cls, text } = mapState(val);
+    badge.className = `perm-badge ${cls}`;
+    badge.textContent = text;
+  });
+}
+
+async function refreshPermissions() {
+  try {
+    const status = await invokeCmd('permissions_status');
+    paintPermissions(status);
+  } catch (e) {
+    console.warn('permissions_status failed', e);
+  }
+}
+
+function wirePermissions() {
+  document.querySelectorAll('.perm-open').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const kind = btn.dataset.kind;
+      if (!kind) return;
+      try { await invokeCmd('open_permission_pane', { kind }); }
+      catch (e) { console.warn('open_permission_pane failed', e); }
+    });
+  });
+  const recheck = document.getElementById('perm-recheck');
+  if (recheck) recheck.addEventListener('click', refreshPermissions);
+
+  // Initial fetch + re-check when the user tabs away from the app and
+  // comes back (they just toggled a setting).
+  refreshPermissions();
+  window.addEventListener('focus', refreshPermissions);
 }
 
 // Format a "running since HH:MM" or "silent for N min" line for the

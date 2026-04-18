@@ -825,6 +825,42 @@ a { color: inherit; }
 .perm-badge.ok { background: oklch(65% 0.10 160 / 0.15); color: oklch(45% 0.12 160); }
 .perm-badge.warn { background: var(--monkey-soft); color: var(--monkey); }
 .perm-badge.stopped { background: var(--monkey-soft); color: var(--monkey); }
+.perm-badge.err { background: rgba(163, 58, 58, 0.14); color: #a33a3a; }
+.perm-badge.unknown { background: var(--ink-06); color: var(--ink-60); }
+
+.perm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.perm-open {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ink-12);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 300ms var(--ease-calm);
+}
+.perm-open:hover { background: var(--ink-06); }
+
+.perm-link {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-60);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin-left: 10px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.perm-link:hover { color: var(--ink); }
 
 /* Data action buttons */
 .data-actions {

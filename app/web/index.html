@@ -88,23 +88,29 @@
           </div>
 
           <div class="set-section">
-            <div class="set-title">Permissions</div>
+            <div class="set-title">Permissions <button type="button" id="perm-recheck" class="perm-link">Re-check</button></div>
             <div class="set-desc">Brainloop needs a couple of macOS permissions to see what you see. We only use what you grant.</div>
-            <div class="perm-row">
+            <div class="perm-row" data-perm="accessibility">
               <div>
                 <div class="perm-name">Accessibility</div>
                 <div class="perm-desc">Window titles, URLs, text of focused elements.</div>
               </div>
-              <div class="perm-badge ok">granted</div>
+              <div class="perm-actions">
+                <button type="button" class="perm-open" data-kind="accessibility">Open System Settings ↗</button>
+                <span class="perm-badge unknown" data-role="badge">checking…</span>
+              </div>
             </div>
-            <div class="perm-row">
+            <div class="perm-row" data-perm="apple_events_chrome">
               <div>
                 <div class="perm-name">Chrome · Allow JavaScript from Apple Events</div>
                 <div class="perm-desc">So we can tell <em>what</em> you were reading, not just which URL.</div>
               </div>
-              <div class="perm-badge ok">granted</div>
+              <div class="perm-actions">
+                <button type="button" class="perm-open" data-kind="apple_events">Open System Settings ↗</button>
+                <span class="perm-badge unknown" data-role="badge">checking…</span>
+              </div>
             </div>
-            <div class="perm-row">
+            <div class="perm-row" data-perm="screen_recording">
               <div>
                 <div class="perm-name">Screen Recording</div>
                 <div class="perm-desc">Optional. Improves capture for some apps.</div>
