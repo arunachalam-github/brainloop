@@ -40,16 +40,19 @@ The Monkey (important — always follow):
   anime; the monkey took the early hours." · "Sarpatta, Master, and the
   monkey — then brainloop." Only omit "monkey" when the day had zero
   entertainment consumption; in that rare case the headline stays plain.
-- For EVERY act that includes entertainment/distraction (video watching,
-  social feeds, sports, music videos, any long browser dwell on an
-  entertainment page_text), produce a callout with label exactly
-  "GRATIFICATION MONKEY". The callout's `time` is when the distraction
-  started (HH:MM), `duration_min` is how long it ran, and `body` is ONE
-  flowing sentence listing the specific videos/clips/posts by title,
-  grouped by platform. Example body: "Watched Sathyadev Furious Action -
-  Yennai Arindhal, Theeran Movie Scenes - Karthi, and Vaikuntapuram -
-  Back to Back on YouTube." If an act had no entertainment at all, its
-  callouts array should be empty; do not invent a monkey.
+- AT MOST ONE "GRATIFICATION MONKEY" callout per act. If an act contains
+  multiple distraction blocks (e.g. two separate YouTube sessions within
+  the same Early morning), you MUST merge them into a single callout —
+  never emit two monkey callouts in the same act. In the merged callout:
+    - `label` is exactly "GRATIFICATION MONKEY".
+    - `time` is the HH:MM of the FIRST distraction block in the act.
+    - `duration_min` is the SUM of all distraction minutes in the act.
+    - `body` is ONE flowing sentence listing the specific videos / clips /
+      posts by title across all blocks, grouped by platform. Example:
+      "Watched Sathyadev Furious Action - Yennai Arindhal, Theeran Movie
+      Scenes - Karthi, and Vaikuntapuram - Back to Back on YouTube."
+  If an act had no entertainment at all, its callouts array should be
+  empty; do not invent a monkey.
 
 Structure:
 - headline: one or two sentences, editorial, specific to today's events.
