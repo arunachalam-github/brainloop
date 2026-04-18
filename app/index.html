@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brainloop</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="topbar">
+      <div class="wordmark"><span class="glyph"></span>brainloop</div>
+      <div class="tabs" id="tab-bar">
+        <button class="tab active" data-tab="today">Today</button>
+        <button class="tab" data-tab="chat">Chat</button>
+        <button class="tab" data-tab="settings">Settings</button>
+      </div>
+      <div class="meta" id="meta-date">—</div>
+    </div>
+
+    <main class="page" id="page">
+      <!-- TODAY -->
+      <section class="screen active" id="screen-today" data-screen-label="today">
+        <div id="today-content">
+          <!-- populated by main.js. Default is empty state; hydrates when today_summary() resolves. -->
+        </div>
+      </section>
+
+      <!-- CHAT -->
+      <section class="screen" id="screen-chat" data-screen-label="chat">
+        <div class="chat-full">
+          <div class="hero reveal" style="padding-bottom: 24px;">
+            <div class="hero-eyebrow">Chat · ask your day anything</div>
+            <h1 class="hero-phrase" style="font-size: clamp(28px, 3.6vw, 44px);">A quiet place to ask your laptop what it saw today.</h1>
+          </div>
+          <div class="chat-body" id="chat-body">
+            <div class="chat-msg bot">Hi. I can tell you about your day — what you worked on, where the monkey took over, when you actually rested. What do you want to know?</div>
+          </div>
+          <div class="chat-suggestions" id="chat-suggestions">
+            <button class="chat-suggestion">Summarize my day</button>
+            <button class="chat-suggestion">What did the monkey do today?</button>
+            <button class="chat-suggestion">Was my morning productive?</button>
+            <button class="chat-suggestion">When did I take breaks?</button>
+            <button class="chat-suggestion">What was I reading?</button>
+          </div>
+          <div class="chat-input">
+            <input id="chat-input" placeholder="Ask about your day…" />
+            <button class="chat-send" id="chat-send" aria-label="Send">
+              <svg viewBox="0 0 16 16" fill="none"><path d="M2 8l12-6-4 14-2-6-6-2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="screen" id="screen-settings" data-screen-label="settings">
+        <div class="settings-wrap reveal">
+          <div class="hero" style="padding-top: 0px; padding-bottom: 16px;">
+            <div class="hero-eyebrow">Settings</div>
+            <h1 class="hero-phrase" style="font-size: clamp(28px, 3.6vw, 44px);">Your keys. Your data. On your machine.</h1>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">AI provider</div>
+            <div class="set-desc">Bring your own key. We never see it — queries go straight from your Mac to the provider you pick.</div>
+            <div class="provider-tabs" id="provider-tabs">
+              <button class="provider-tab active" data-provider="anthropic">Anthropic</button>
+              <button class="provider-tab" data-provider="openai">OpenAI</button>
+              <button class="provider-tab" data-provider="gemini">Gemini</button>
+            </div>
+            <div class="set-field">
+              <label>API key</label>
+              <input type="password" id="set-api-key" placeholder="sk-…  (Anthropic key)" />
+            </div>
+            <div class="set-field">
+              <label>Model</label>
+              <input id="set-model" value="claude-sonnet-4-5" />
+            </div>
+            <div class="set-field">
+              <label>Base URL</label>
+              <input id="set-base-url" value="https://api.anthropic.com" />
+            </div>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">Permissions</div>
+            <div class="set-desc">Brainloop needs a couple of macOS permissions to see what you see. We only use what you grant.</div>
+            <div class="perm-row">
+              <div>
+                <div class="perm-name">Accessibility</div>
+                <div class="perm-desc">Window titles, URLs, text of focused elements.</div>
+              </div>
+              <div class="perm-badge ok">granted</div>
+            </div>
+            <div class="perm-row">
+              <div>
+                <div class="perm-name">Chrome · Allow JavaScript from Apple Events</div>
+                <div class="perm-desc">So we can tell <em>what</em> you were reading, not just which URL.</div>
+              </div>
+              <div class="perm-badge ok">granted</div>
+            </div>
+            <div class="perm-row">
+              <div>
+                <div class="perm-name">Screen Recording</div>
+                <div class="perm-desc">Optional. Improves capture for some apps.</div>
+              </div>
+              <div class="perm-badge warn">optional</div>
+            </div>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">Data</div>
+            <div class="set-desc">Everything lives in a SQLite file on your Mac. Nothing is uploaded, synced, or sent anywhere.</div>
+            <div class="set-field">
+              <label>Database location</label>
+              <input readonly value="~/Library/Application Support/brainloop/activity.db" />
+            </div>
+            <div class="data-actions">
+              <button class="data-action" id="btn-export-today">Export today</button>
+              <button class="data-action danger" id="btn-delete-all">Delete all data</button>
+            </div>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">Daemon</div>
+            <div class="set-desc">Status of the background process that records your activity.</div>
+            <div class="perm-row" id="daemon-row">
+              <div>
+                <div class="perm-name">brainloop-daemon</div>
+                <div class="perm-desc" id="daemon-desc">checking…</div>
+              </div>
+              <div class="perm-badge warn" id="daemon-badge">pending</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="viz-tooltip" id="viz-tooltip"></div>
+  <script src="main.js"></script>
+</body>
+</html>
