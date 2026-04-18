@@ -120,16 +120,19 @@ function wireTabs() {
 }
 
 // ─── Seismograph waveform ────────────────────────────────────────────
-// Continuous horizontal line that oscillates vertically with amplitude and
-// frequency both scaling to a bucket's switch count. Empty / calm buckets
-// stay close to flat; chaotic buckets show tall dense tremors.
+// Continuously animated line: each bucket has a state-derived amplitude,
+// frequency, and scroll speed. Calm segments barely breathe; chaotic ones
+// visibly flow. Every bucket is also envelope-faded at its edges so
+// neighbours stitch together without visible seams.
 //
-// Last painted state (buckets, layout geometry) is stashed on the canvas
-// so the hover handler can do a hit-test without recomputing.
-const STATE_AMPLITUDE = { empty: 0.02, calm: 0.18, busy: 0.5, chaotic: 0.95 };
+// Last painted layout is stashed on the canvas so the hover handler can
+// hit-test without recomputing.
+const STATE_FREQ  = { empty: 0,   calm: 1.6, busy: 4.0,  chaotic: 9.0 };
+const STATE_AMP   = { empty: 0,   calm: 0.07, busy: 0.26, chaotic: 0.70 };
+const STATE_SPEED = { empty: 0,   calm: 0.35, busy: 0.9,  chaotic: 1.8 };
+const PTS_PER_BUCKET = 60;
 
-// Tiny deterministic PRNG so repaints on resize produce the same waveform
-// rather than wobbling randomly each time.
+// Tiny deterministic PRNG so repaints on resize keep the same phases.
 function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
@@ -155,74 +158,81 @@ function paintWaveform(canvas, buckets) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const paddingX = 4;
-  const availW  = cssW - paddingX * 2;
-  const midY    = cssH / 2;
-  const maxAmp  = (cssH / 2) - 10;
+  const availW   = cssW - paddingX * 2;
+  const midY     = cssH / 2;
+  const halfH    = (cssH / 2) - 10;
   const maxCount = Math.max(1, ...buckets.map(b => b?.count || 0));
-  const bucketW = availW / Math.max(buckets.length, 1);
+  const bucketW  = availW / Math.max(buckets.length, 1);
 
-  // Pre-compute a y-offset for every x pixel. Mixing a handful of sine
-  // harmonics + low-amplitude noise gives an organic seismograph shape
-  // without a real DSP. Amplitude at x is driven by the bucket under x.
-  const n = Math.round(availW);
-  const ys = new Float32Array(n);
-  const rnd = mulberry32(42);
-  // Phase table — one phase per bucket so "busy" runs have coherent
-  // signature rather than per-pixel static.
-  const phases = buckets.map(() => rnd() * Math.PI * 2);
+  // Per-bucket parameters: frequency, amplitude, scroll speed, two random
+  // phase offsets so neighbouring chaotic buckets don't read as one cosine.
+  const rnd = mulberry32(137);
+  const params = buckets.map(b => {
+    const state = b?.state || 'empty';
+    const tN    = (b?.count || 0) / maxCount;
+    const freq  = state === 'empty' ? 0 : STATE_FREQ[state] + tN * STATE_FREQ[state] * 0.5;
+    const amp   = state === 'empty' ? 0 : halfH * STATE_AMP[state] * (0.75 + tN * 0.35);
+    const speed = STATE_SPEED[state] * (0.8 + tN * 0.4);
+    return { freq, amp, speed, ph1: rnd() * Math.PI * 2, ph2: rnd() * Math.PI * 2, state };
+  });
 
-  for (let i = 0; i < n; i++) {
-    const x = i;
-    const bucketIdx = Math.min(buckets.length - 1, Math.floor(x / bucketW));
-    const b = buckets[bucketIdx] || {};
-    const countNorm = (b.count || 0) / maxCount;
-    const stateAmp  = STATE_AMPLITUDE[b.state || 'empty'] ?? 0.02;
-    const amp = Math.max(countNorm, stateAmp) * maxAmp;
-
-    // Frequency — chaotic buckets cram more oscillations per pixel.
-    const freq  = 0.18 + countNorm * 1.1;           // radians per px
-    const noise = (rnd() - 0.5) * 0.18;              // ±9% jitter
-    const phase = phases[bucketIdx] || 0;
-    const base  = Math.sin(x * freq + phase);
-    const harm  = Math.sin(x * freq * 2.3 + phase * 0.7) * 0.35;
-    ys[i] = (base + harm + noise) * amp;
-  }
-
-  // Cache layout + hit-test geometry for the hover handler.
+  // Cache hit-test geometry for hover.
   canvas._viz = { buckets, paddingX, bucketW, midY, cssW, cssH };
 
-  // First-paint rise animation: scale ys from 0 → 1 over DURATION.
-  const DURATION = 1100;
-  const start = performance.now();
+  // Cancel any previous RAF loop still running on this canvas (e.g. resize).
   if (canvas._raf) cancelAnimationFrame(canvas._raf);
 
-  function frame(t) {
-    const progress = Math.min(1, (t - start) / DURATION);
-    const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+  const RISE_MS = 1100;
+  const startMs = performance.now();
+
+  function frame(ts) {
+    const elapsed = (ts - startMs) / 1000;
+    const riseProgress = Math.min(1, (ts - startMs) / RISE_MS);
+    const rise = 1 - Math.pow(1 - riseProgress, 3); // easeOutCubic
 
     ctx.clearRect(0, 0, cssW, cssH);
 
-    // Gentle zero-line under the wave.
-    ctx.strokeStyle = 'rgba(34,26,18,0.08)';
+    // Dotted baseline.
+    ctx.save();
+    ctx.setLineDash([2, 10]);
+    ctx.strokeStyle = 'rgba(34,26,18,0.09)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(paddingX, midY + 0.5);
     ctx.lineTo(cssW - paddingX, midY + 0.5);
     ctx.stroke();
+    ctx.restore();
 
-    ctx.strokeStyle = 'rgba(34,26,18,0.75)';
-    ctx.lineWidth = 1.2;
+    // Waveform path.
+    ctx.strokeStyle = 'rgba(34,26,18,0.72)';
+    ctx.lineWidth = 1.3;
     ctx.lineJoin = 'round';
+    ctx.lineCap  = 'round';
     ctx.beginPath();
-    ctx.moveTo(paddingX, midY);
-    for (let i = 0; i < n; i++) {
-      ctx.lineTo(paddingX + i, midY + ys[i] * eased);
+
+    let first = true;
+    for (let i = 0; i < buckets.length; i++) {
+      const p = params[i];
+      for (let pt = 0; pt <= PTS_PER_BUCKET; pt++) {
+        const frac = pt / PTS_PER_BUCKET;
+        const x = paddingX + (i + frac) * bucketW;
+        let y = midY;
+        if (p.freq > 0) {
+          // Edge envelope: ramp up in first 1/6, ramp down in last 1/6 of bucket.
+          const env = Math.min(frac * 6, 1) * Math.min((1 - frac) * 6, 1);
+          const wave = Math.sin(frac * p.freq * Math.PI * 2 + elapsed * p.speed + p.ph1);
+          const harm = Math.sin(frac * p.freq * 1.7 * Math.PI * 2 + elapsed * p.speed * 1.3 + p.ph2) * 0.35;
+          y = midY - (wave + harm) * p.amp * env * rise;
+        }
+        if (first) { ctx.moveTo(x, y); first = false; }
+        else       { ctx.lineTo(x, y); }
+      }
     }
     ctx.stroke();
 
-    if (progress < 1) canvas._raf = requestAnimationFrame(frame);
-    else canvas._raf = null;
+    canvas._raf = requestAnimationFrame(frame);
   }
+
   canvas._raf = requestAnimationFrame(frame);
 }
 
