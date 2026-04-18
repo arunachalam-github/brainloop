@@ -67,6 +67,24 @@ Structure:
 - widgets: fill every field from the context; if the day has no calls,
   on_calls.count is 0 (not missing).
 - intensity_buckets: pass through the provided buckets verbatim.
+- widgets.things_read: a short, clean list (max ~8 entries). Each entry's
+  `title` MUST be the actual content title — like a single video name,
+  article headline, or named feed — NEVER a raw page_text excerpt and
+  NEVER a description. Extract titles from the page_text slices (they
+  usually appear near the top). Good titles: "Yennai Arindhal scenes",
+  "Sarpatta Parambarai scenes", "Rahul Gandhi - Lok Sabha", "Facebook
+  feed", "Twitter home". Bad titles: "Create Home Shorts Subscriptions
+  …", "Workflow Credential Project Enterprise Overview …", or any
+  sidebar/nav text.
+  `source` is ALWAYS the content platform — "YouTube", "Twitter",
+  "Facebook", "Instagram", "Reddit", "Medium", "Hacker News", "GitHub",
+  "Wikipedia", etc. NEVER a browser or app name ("Comet", "Chrome",
+  "Safari"). Infer the platform from the page_text itself — YouTube
+  pages have "views · # likes", Reddit pages have "r/<sub>", Twitter
+  has "@handle", etc. If you genuinely can't identify a platform for
+  an entry, omit that entry entirely rather than labeling it with the
+  browser name. Only include entries where you're confident about
+  both title and source.
 
 Output strictly valid JSON matching the schema. No prose outside the JSON.
 """
@@ -238,14 +256,18 @@ PAYLOAD_SCHEMA = {
                     },
                     "things_read": {
                         "type": "array",
+                        "maxItems": 8,
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
                             "required": ["time", "title", "source"],
                             "properties": {
                                 "time":   {"type": "string", "maxLength": 10},
-                                "title":  {"type": "string", "maxLength": 120},
-                                "source": {"type": "string", "maxLength": 40},
+                                # 60 chars forces the model to emit an actual
+                                # title instead of padding out a page_text
+                                # excerpt. Real video / article titles fit.
+                                "title":  {"type": "string", "maxLength": 60},
+                                "source": {"type": "string", "maxLength": 24},
                             },
                         },
                     },

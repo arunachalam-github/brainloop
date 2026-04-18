@@ -113,6 +113,8 @@ def tick(conn: sqlite3.Connection, now_ts: float | None = None, force: bool = Fa
         log.warning("analyzer tick failed: %s", e)
         return
 
+    _sanitize_payload(payload)
+
     duration = time.time() - started
 
     conn.execute(
@@ -135,6 +137,34 @@ def tick(conn: sqlite3.Connection, now_ts: float | None = None, force: bool = Fa
         "analyzer tick OK date=%s rows=%d model=%s tokens=%d→%d duration=%.1fs",
         today, context["total_rows"], cfg["ai_model"], tok_in, tok_out, duration,
     )
+
+
+# ── Payload sanitizer ─────────────────────────────────────────────────────────
+
+_BROWSER_SOURCES = {
+    "comet", "chrome", "google chrome", "safari", "arc", "brave", "brave browser",
+    "firefox", "edge", "microsoft edge", "opera", "vivaldi", "chromium",
+    "duckduckgo",
+}
+
+
+def _sanitize_payload(payload: dict) -> None:
+    """Trim widgets the model got wrong. Mutates in place.
+
+    Currently: drop `things_read` entries whose `source` is a browser app
+    rather than a content platform (YouTube, Twitter, etc.). Gemini keeps
+    falling back to the browser name when it can't identify the platform
+    from page_text, despite explicit prompt guidance against it.
+    """
+    try:
+        items = payload.get("widgets", {}).get("things_read") or []
+    except AttributeError:
+        return
+    cleaned = [
+        it for it in items
+        if isinstance(it, dict) and (it.get("source") or "").strip().lower() not in _BROWSER_SOURCES
+    ]
+    payload["widgets"]["things_read"] = cleaned
 
 
 # ── Context builder (pure aggregation, no LLM) ────────────────────────────────
