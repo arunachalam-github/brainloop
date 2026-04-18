@@ -62,10 +62,12 @@ Structure:
   i.e. from the WOKE UP time shown in the context through "now". NEVER
   produce an act with a time_range that starts before the WOKE UP
   time, even if "Early morning" or "Mid-morning" would otherwise be
-  appropriate — those hours were sleep. Pick titles from {Early
-  morning, Mid-morning, Late morning, Midday, Afternoon, Late
-  afternoon, Evening, Night, Now} that match the actual clock time of
-  the block. Each act should span roughly 1-3 hours; NEVER
+  appropriate — those hours were sleep. Pick titles from {Past
+  midnight, Early morning, Mid-morning, Late morning, Midday,
+  Afternoon, Late afternoon, Evening, Night, Now} that match the
+  actual clock time of the block. Use "Past midnight" (NOT "Early
+  morning") for any block whose start_time is before 04:00 — "Early
+  morning" only applies to 04:00-08:00. Each act should span roughly 1-3 hours; NEVER
   compress more than 3 hours of active work into a single act unless
   the user did one continuous thing the whole time (e.g. a 4-hour
   coding session with no context switches). If the active window is

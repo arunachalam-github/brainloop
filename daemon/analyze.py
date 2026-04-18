@@ -156,8 +156,11 @@ _BROWSER_SOURCES = {
 # title + body for these keywords. First match wins, so order matters — put
 # more specific fingerprints before generic ones.
 _PLATFORM_FINGERPRINTS = (
-    ("YouTube",     ("youtube", "shorts", "subscriptions", "watch later", "simulcast")),
-    ("Crunchyroll", ("crunchyroll", "simulcast")),
+    # Crunchyroll first — its "simulcast" keyword was being swallowed by a
+    # YouTube rule that also listed simulcast, causing every Crunchyroll
+    # anime page to get mislabeled as YouTube.
+    ("Crunchyroll", ("crunchyroll", "simulcast", "funimation")),
+    ("YouTube",     ("youtube", "shorts subscriptions", "subscriptions library", "watch later")),
     ("Netflix",     ("netflix",)),
     ("Twitch",      ("twitch", "streamer")),
     ("X / Twitter", ("twitter", "tweet", " x ")),
