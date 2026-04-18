@@ -27,6 +27,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png"],
+    "resources": [
+      "resources/brainloopd",
+      "resources/com.brainloop.agent.plist.template"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
   }
 }

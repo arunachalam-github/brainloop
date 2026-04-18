@@ -3,7 +3,10 @@
 
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
+use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
+use tauri::Manager;
 
 fn db_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
@@ -292,7 +295,7 @@ fn ai_config_save(
     )
     .map_err(|e| e.to_string())?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    let mut upsert = |k: &str, v: &str| -> Result<(), String> {
+    let upsert = |k: &str, v: &str| -> Result<(), String> {
         tx.execute(
             "INSERT INTO app_config(key,value) VALUES(?1,?2)
              ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -311,8 +314,141 @@ fn ai_config_save(
     Ok(())
 }
 
+// ── First-launch daemon install ──────────────────────────────────────────────
+//
+// When the app starts from a bundled .app (say, /Applications/Brainloop.app),
+// we write a LaunchAgent plist pointing at the embedded daemon binary and
+// tell launchctl to load it. Idempotent: if the plist already points at this
+// binary we do nothing; if the .app moved locations, we regenerate and reload.
+//
+// Dev-mode safety: if the resource binary doesn't exist (e.g. `cargo tauri
+// dev` without `make bundle-daemon`), we skip silently so development isn't
+// gated on a release build.
+
+const DAEMON_LABEL: &str = "com.brainloop.agent";
+
+fn launchagent_plist_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home)
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{}.plist", DAEMON_LABEL))
+}
+
+fn runtime_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("brainloop")
+}
+
+fn render_plist(daemon_bin: &PathBuf, rt_dir: &PathBuf) -> String {
+    // Built from scratch rather than substituting into the source-mode
+    // template — bundle mode runs the compiled binary directly, no
+    // python -m indirection.
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{daemon}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>{rt}/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>{rt}/daemon-err.log</string>
+</dict>
+</plist>
+"#,
+        label = DAEMON_LABEL,
+        daemon = daemon_bin.display(),
+        rt = rt_dir.display(),
+    )
+}
+
+fn ensure_daemon_installed(app: &tauri::AppHandle) -> Result<(), String> {
+    // 1. Make sure the runtime directory exists (daemon writes its DB + logs there).
+    let rt = runtime_dir();
+    fs::create_dir_all(&rt).map_err(|e| format!("create runtime dir: {}", e))?;
+
+    // 2. Resolve the embedded daemon binary. In dev mode this resource doesn't
+    //    exist — skip silently so `cargo tauri dev` isn't gated on a release build.
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resolve resource dir: {}", e))?;
+    let daemon_bin = resource_dir.join("resources").join("brainloopd");
+
+    if !daemon_bin.exists() {
+        eprintln!(
+            "[brainloop] daemon binary not bundled at {} — dev mode, skipping install",
+            daemon_bin.display()
+        );
+        return Ok(());
+    }
+
+    // 3. Render and compare against existing plist. If identical, the daemon
+    //    should already be loaded — nothing to do.
+    let plist_text = render_plist(&daemon_bin, &rt);
+    let plist_path = launchagent_plist_path();
+    fs::create_dir_all(plist_path.parent().unwrap())
+        .map_err(|e| format!("create LaunchAgents dir: {}", e))?;
+
+    if let Ok(existing) = fs::read_to_string(&plist_path) {
+        if existing == plist_text {
+            eprintln!("[brainloop] LaunchAgent already current at {}", plist_path.display());
+            return Ok(());
+        }
+        // Existing plist is stale (e.g. user moved the .app). Unload first.
+        let _ = Command::new("launchctl")
+            .args(["unload", plist_path.to_str().unwrap()])
+            .status();
+    }
+
+    // 4. Write the new plist and load it.
+    fs::write(&plist_path, &plist_text).map_err(|e| format!("write plist: {}", e))?;
+    let out = Command::new("launchctl")
+        .args(["load", plist_path.to_str().unwrap()])
+        .output()
+        .map_err(|e| format!("launchctl load: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "launchctl load failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    eprintln!(
+        "[brainloop] Installed LaunchAgent → {}",
+        plist_path.display()
+    );
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
+        .setup(|app| {
+            // Run the installer off the main thread — launchctl can block briefly
+            // during unload/load and we don't want to hold up window creation.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Err(e) = ensure_daemon_installed(&handle) {
+                    eprintln!("[brainloop] daemon install failed: {}", e);
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             row_count,
             today_summary,

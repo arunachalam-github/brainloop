@@ -36,7 +36,8 @@ KEYCHAIN_SVC := com.brainloop.ai
 .PHONY: help install uninstall reinstall restart status logs sync \
         clean clean-cache clean-all venv \
         ui ui-build analyze-now show-summary \
-        config-gemini config-anthropic config-openai
+        config-gemini config-anthropic config-openai \
+        bundle-daemon bundle clean-bundle
 
 help:
 	@echo "Brainloop — available targets:"
@@ -197,3 +198,56 @@ ui:
 # Release build: produces Brainloop.app under app/src-tauri/target/release/bundle/macos
 ui-build:
 	@cd "$(PROJ_DIR)/app" && cargo tauri build
+
+# ── Bundling (standalone distribution) ────────────────────────────────────────
+#
+# `make bundle` produces a single Brainloop.app that friends can download and
+# run — no Python, no Homebrew, no `make install`. The daemon is compiled to
+# a standalone executable with PyInstaller, embedded inside the .app's
+# Resources, and the Tauri UI installs the LaunchAgent on first launch.
+#
+#   make bundle-daemon  → build/dist/brainloopd (single-file executable)
+#   make bundle         → bundle-daemon + cargo tauri build → .app + .dmg
+
+BUILD_DIR      := $(PROJ_DIR)/build
+BUILD_VENV     := $(BUILD_DIR)/venv
+BUILD_VENV_PY  := $(BUILD_VENV)/bin/python3
+BUILD_PYINST   := $(BUILD_VENV)/bin/pyinstaller
+DAEMON_BIN     := $(BUILD_DIR)/dist/brainloopd
+TAURI_RES_DIR  := $(PROJ_DIR)/app/src-tauri/resources
+
+$(BUILD_VENV_PY):
+	@mkdir -p "$(BUILD_DIR)"
+	@echo "→ Creating build venv at $(BUILD_VENV)"
+	@$(PYTHON) -m venv "$(BUILD_VENV)"
+	@"$(BUILD_VENV_PY)" -m pip install --quiet --upgrade pip
+	@"$(BUILD_VENV_PY)" -m pip install --quiet -r "$(PROJ_DIR)/requirements.txt"
+	@"$(BUILD_VENV_PY)" -m pip install --quiet pyinstaller
+	@echo "→ Build venv ready"
+
+# Compile daemon/ into a single-file executable. Output: build/dist/brainloopd
+# (~20–40 MB including pyobjc frameworks). The binary is architecture-specific
+# to the host (ARM64 on Apple Silicon, x86_64 on Intel).
+bundle-daemon: $(BUILD_VENV_PY)
+	@echo "→ Building brainloopd with PyInstaller…"
+	@cd "$(BUILD_DIR)" && "$(BUILD_PYINST)" --clean --noconfirm brainloopd.spec
+	@ls -lh "$(DAEMON_BIN)"
+	@echo "→ Smoke test: $(DAEMON_BIN) --help"
+	@"$(DAEMON_BIN)" --help 2>&1 | head -5 || true
+	@mkdir -p "$(TAURI_RES_DIR)"
+	@cp "$(DAEMON_BIN)" "$(TAURI_RES_DIR)/brainloopd"
+	@cp "$(PROJ_DIR)/com.brainloop.agent.plist.template" "$(TAURI_RES_DIR)/"
+	@echo "→ Copied brainloopd + plist template into $(TAURI_RES_DIR)"
+
+# End-to-end bundle: daemon binary → Tauri release build → Brainloop.app + DMG.
+bundle: bundle-daemon
+	@echo "→ Building Tauri release bundle…"
+	@cd "$(PROJ_DIR)/app" && cargo tauri build
+	@echo ""
+	@echo "✓ Bundle ready:"
+	@ls "$(PROJ_DIR)/app/src-tauri/target/release/bundle/macos/"*.app 2>/dev/null || true
+	@ls "$(PROJ_DIR)/app/src-tauri/target/release/bundle/dmg/"*.dmg 2>/dev/null || true
+
+clean-bundle:
+	@rm -rf "$(BUILD_DIR)/build" "$(BUILD_DIR)/dist" "$(TAURI_RES_DIR)"
+	@echo "→ Cleaned bundle artifacts"
