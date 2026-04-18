@@ -24,8 +24,15 @@ import AppKit
 import ApplicationServices as AS
 import CoreFoundation as CF
 
-from .config import HEARTBEAT_SECS, LOG_PATH, DB_PATH
+from .config import (
+    HEARTBEAT_SECS,
+    LOG_PATH,
+    DB_PATH,
+    ANALYZER_INTERVAL_SECS,
+    ANALYZER_FIRST_DELAY_SECS,
+)
 from . import db as _db
+from . import analyze as _analyze
 from .capture.ax import get_active_app
 from .capture import observer as _observer
 from .capture import workspace as _workspace
@@ -51,6 +58,21 @@ log = logging.getLogger("brainloop.daemon")
 def _heartbeat_cb(timer, info) -> None:
     _db.write_snapshot("heartbeat")
     log.info("heartbeat | total records: %d", _db.total_records())
+
+
+# ── Analyzer timer callback ───────────────────────────────────────────────────
+# Called every ANALYZER_INTERVAL_SECS. Uses the shared DB connection held by
+# the `db` module — that connection was opened with `check_same_thread=False`.
+# Every exception is swallowed: the analyzer must never kill the capture loop.
+
+def _analyzer_cb(timer, info) -> None:
+    try:
+        conn = _db._db  # intentionally private — the daemon owns the lifecycle
+        if conn is None:
+            return
+        _analyze.tick(conn)
+    except Exception:
+        log.exception("analyzer tick raised — suppressing to keep capture alive")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -101,6 +123,26 @@ def main() -> None:
     )
     CF.CFRunLoopAddTimer(
         CF.CFRunLoopGetCurrent(), heartbeat_timer, CF.kCFRunLoopDefaultMode
+    )
+
+    # Analyzer timer (30 min) — writes day_summary rows via LLM.
+    # First fire is delayed ANALYZER_FIRST_DELAY_SECS after startup so the
+    # capture loop has a chance to land at least one row before we analyze.
+    analyzer_timer = CF.CFRunLoopTimerCreate(
+        None,
+        CF.CFAbsoluteTimeGetCurrent() + ANALYZER_FIRST_DELAY_SECS,
+        ANALYZER_INTERVAL_SECS,
+        0,
+        0,
+        _analyzer_cb,
+        None,
+    )
+    CF.CFRunLoopAddTimer(
+        CF.CFRunLoopGetCurrent(), analyzer_timer, CF.kCFRunLoopDefaultMode
+    )
+    log.info(
+        "analyzer timer armed: first fire in %ds, then every %ds",
+        ANALYZER_FIRST_DELAY_SECS, ANALYZER_INTERVAL_SECS,
     )
 
     # Graceful shutdown on SIGTERM / SIGINT

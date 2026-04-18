@@ -22,12 +22,38 @@ USE_APPLESCRIPT_PAGE_TEXT  = True   # Set False to disable AppleScript page capt
 APPLESCRIPT_MAX_CHARS      = 10000   # Cap on page_text column (viewport content)
 DETECT_AUDIO               = True   # Set False to disable CoreAudio listeners entirely
 
+# ── Analyzer (LLM day-summary generator) ─────────────────────────────────────
+ANALYZER_INTERVAL_SECS     = 1800   # 30 min — one LLM call per tick (if not gated out)
+ANALYZER_FIRST_DELAY_SECS  = 60     # let capture warm up before the first analyzer run
+ANALYZER_IDLE_SKIP_MINS    = 120    # skip tick if last activity row is older than this
+ANALYZER_MIN_REGEN_SECS    = 1200   # ignore a tick if we ran within the last 20 min
+ANALYZER_MAX_DWELLS        = 20     # cap on browser dwells sent to LLM per call
+ANALYZER_PAGE_TEXT_CHARS   = 800    # per-dwell page_text slice budget (head 400 + tail 400)
+ANALYZER_KEYCHAIN_SERVICE  = "com.brainloop.ai"  # `security -s` label for the API key
+
 # ── Browser bundle IDs (for URL extraction via AX address bar) ────────────────
 BROWSER_BUNDLES: frozenset[str] = frozenset({
+    # Mainstream
     "com.google.Chrome",
     "com.apple.Safari",
     "org.mozilla.firefox",
-    "company.thebrowser.Browser",   # Arc
+    "company.thebrowser.Browser",        # Arc
     "com.brave.Browser",
     "com.microsoft.edgemac",
+    # AI / alt browsers
+    "ai.perplexity.comet",               # Comet (Perplexity)
+    "com.duckduckgo.macos.browser",      # DuckDuckGo
+    "com.operasoftware.Opera",           # Opera
+    "com.vivaldi.Vivaldi",               # Vivaldi
+    "org.chromium.Chromium",             # Chromium
+    # Pre-release channels
+    "com.google.Chrome.canary",
+    "com.google.Chrome.beta",
+    "com.google.Chrome.dev",
+    "com.apple.SafariTechnologyPreview",
+    "com.microsoft.edgemac.Beta",
+    "com.microsoft.edgemac.Dev",
+    "com.microsoft.edgemac.Canary",
+    "org.mozilla.nightly",
+    "org.mozilla.firefoxdeveloperedition",
 })
