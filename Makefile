@@ -27,24 +27,41 @@ RUNTIME_DIR  := $(HOME)/Library/Application Support/brainloop
 VENV_DIR     := $(RUNTIME_DIR)/venv
 VENV_PY      := $(VENV_DIR)/bin/python3
 SRC_DIR      := $(RUNTIME_DIR)/src
+DB_PATH      := $(RUNTIME_DIR)/activity.db
 LABEL        := com.brainloop.agent
 TEMPLATE     := $(PROJ_DIR)/com.brainloop.agent.plist.template
 PLIST_DST    := $(HOME)/Library/LaunchAgents/$(LABEL).plist
+KEYCHAIN_SVC := com.brainloop.ai
 
-.PHONY: help install uninstall reinstall restart status logs sync clean clean-cache clean-all venv
+.PHONY: help install uninstall reinstall restart status logs sync \
+        clean clean-cache clean-all venv \
+        ui ui-build analyze-now show-summary \
+        config-gemini config-anthropic config-openai
 
 help:
 	@echo "Brainloop — available targets:"
-	@echo "  make install      Build venv, sync source, load LaunchAgent"
-	@echo "  make reinstall    Sync source, regenerate plist, relaunch daemon"
-	@echo "  make uninstall    Stop daemon, remove LaunchAgent (runtime data kept)"
-	@echo "  make restart      Restart the daemon"
-	@echo "  make sync         Copy daemon/ source to runtime dir (no restart)"
-	@echo "  make status       Show LaunchAgent state + recent log lines"
-	@echo "  make logs         Tail the live log (Ctrl-C to stop)"
-	@echo "  make clean-cache  Wipe __pycache__/ under runtime source"
-	@echo "  make clean        Remove the runtime venv (run uninstall first)"
-	@echo "  make clean-all    Remove venv + synced source + plist (DB kept)"
+	@echo ""
+	@echo "  daemon:"
+	@echo "    make install      Build venv, sync source, load LaunchAgent"
+	@echo "    make reinstall    Sync source, regenerate plist, relaunch daemon"
+	@echo "    make uninstall    Stop daemon, remove LaunchAgent (data kept)"
+	@echo "    make restart      Restart the daemon"
+	@echo "    make status       Show LaunchAgent state + recent log lines"
+	@echo "    make logs         Tail the live log (Ctrl-C to stop)"
+	@echo ""
+	@echo "  analyzer + UI:"
+	@echo "    make config-gemini    Write Gemini provider config to app_config"
+	@echo "    make config-anthropic Write Anthropic provider config"
+	@echo "    make config-openai    Write OpenAI provider config"
+	@echo "    make analyze-now      Force one analyzer tick (bypasses gates)"
+	@echo "    make show-summary     Print today's generated headline + acts"
+	@echo "    make ui               Launch the Tauri desktop app (cargo tauri dev)"
+	@echo "    make ui-build         Produce a release .app bundle"
+	@echo ""
+	@echo "  cleanup:"
+	@echo "    make clean-cache  Wipe __pycache__/ under runtime source"
+	@echo "    make clean        Remove the runtime venv (run uninstall first)"
+	@echo "    make clean-all    Remove venv + synced source + plist (DB kept)"
 
 # ── venv lifecycle ─────────────────────────────────────────────────────────────
 
@@ -138,3 +155,45 @@ clean:
 clean-all: uninstall
 	rm -rf "$(VENV_DIR)" "$(SRC_DIR)"
 	@echo "Removed venv + synced source. DB preserved at $(RUNTIME_DIR)/activity.db"
+
+# ── Analyzer (LLM day-summary) ────────────────────────────────────────────────
+
+# Write the provider settings into the shared `app_config` table. The API key
+# itself lives in Keychain under service "$(KEYCHAIN_SVC)" — add it yourself
+# with `security add-generic-password -s $(KEYCHAIN_SVC) -a <provider> -w`
+# because we never want a key printed in the shell history.
+config-gemini:
+	@sqlite3 "$(DB_PATH)" "INSERT OR REPLACE INTO app_config(key, value) VALUES ('ai_provider','gemini'), ('ai_model','gemini-2.5-flash'), ('ai_base_url','https://generativelanguage.googleapis.com/v1beta/openai'), ('ai_key_ref','$(KEYCHAIN_SVC):gemini');"
+	@echo "✓ app_config set for Gemini (gemini-2.5-flash)"
+	@echo "  Now add your key:  security add-generic-password -s $(KEYCHAIN_SVC) -a gemini -w"
+
+config-anthropic:
+	@sqlite3 "$(DB_PATH)" "INSERT OR REPLACE INTO app_config(key, value) VALUES ('ai_provider','anthropic'), ('ai_model','claude-sonnet-4-5'), ('ai_base_url','https://api.anthropic.com'), ('ai_key_ref','$(KEYCHAIN_SVC):anthropic');"
+	@echo "✓ app_config set for Anthropic (claude-sonnet-4-5)"
+	@echo "  Now add your key:  security add-generic-password -s $(KEYCHAIN_SVC) -a anthropic -w"
+
+config-openai:
+	@sqlite3 "$(DB_PATH)" "INSERT OR REPLACE INTO app_config(key, value) VALUES ('ai_provider','openai'), ('ai_model','gpt-4o-mini'), ('ai_base_url','https://api.openai.com/v1'), ('ai_key_ref','$(KEYCHAIN_SVC):openai');"
+	@echo "✓ app_config set for OpenAI (gpt-4o-mini)"
+	@echo "  Now add your key:  security add-generic-password -s $(KEYCHAIN_SVC) -a openai -w"
+
+# Force one analyzer run against the repo's current daemon/ source,
+# bypassing the 20-min regen gate and the "no new rows" gate. Requires
+# the Keychain key + app_config rows to already exist.
+analyze-now:
+	@PYTHONPATH="$(PROJ_DIR)" "$(VENV_PY)" -m daemon.analyze --once --force
+
+# Pretty-print today's day_summary row for a quick smoke check.
+show-summary:
+	@sqlite3 "$(DB_PATH)" "SELECT '  date: ' || date || char(10) || '  generated_at: ' || datetime(generated_at,'unixepoch','localtime') || char(10) || '  model: ' || model || char(10) || '  activity_rows: ' || activity_rows || char(10) || '  tokens_in/out: ' || tokens_in || ' / ' || tokens_out || char(10) || '  headline: ' || json_extract(payload_json,'\$$.headline') FROM day_summary WHERE date=date('now','localtime');" 2>/dev/null || echo "  (no day_summary row for today yet — run 'make analyze-now')"
+
+# ── UI (Tauri desktop app) ────────────────────────────────────────────────────
+
+# Dev launch: hot-reloads JS/HTML/CSS, rebuilds Rust on change.
+# First launch takes ~2 min to compile the Tauri tree.
+ui:
+	@cd "$(PROJ_DIR)/app" && cargo tauri dev
+
+# Release build: produces Brainloop.app under app/src-tauri/target/release/bundle/macos
+ui-build:
+	@cd "$(PROJ_DIR)/app" && cargo tauri build
