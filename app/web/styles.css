@@ -862,6 +862,32 @@ a { color: inherit; }
 }
 .perm-link:hover { color: var(--ink); }
 
+.perm-help {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-60);
+  max-width: 640px;
+}
+.perm-help code {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  background: var(--ink-06);
+  border-radius: 3px;
+}
+.perm-inline-link {
+  font: inherit;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.perm-inline-link:hover { opacity: 0.75; }
+
 /* Data action buttons */
 .data-actions {
   display: flex;

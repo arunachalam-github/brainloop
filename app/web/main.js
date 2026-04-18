@@ -764,10 +764,16 @@ function paintPermissions(status) {
     const val = status?.[key];
     if (!val) return;
     const badge = row.querySelector('[data-role="badge"]');
-    if (!badge) return;
-    const { cls, text } = mapState(val);
-    badge.className = `perm-badge ${cls}`;
-    badge.textContent = text;
+    if (badge) {
+      const { cls, text } = mapState(val);
+      badge.className = `perm-badge ${cls}`;
+      badge.textContent = text;
+    }
+    // Reveal the "drag brainloopd into the list" helper only when the
+    // system actually says we're not granted — hiding the clutter in
+    // the happy path.
+    const help = row.querySelector('[data-role="help"]');
+    if (help) help.hidden = val !== 'not_granted';
   });
 }
 
@@ -805,6 +811,12 @@ function wirePermissions() {
   });
   const recheck = document.getElementById('perm-recheck');
   if (recheck) recheck.addEventListener('click', refreshPermissions);
+
+  const reveal = document.getElementById('reveal-daemon');
+  if (reveal) reveal.addEventListener('click', async () => {
+    try { await invokeCmd('reveal_daemon_binary'); }
+    catch (e) { console.warn('reveal_daemon_binary failed', e); }
+  });
 
   // Start/stop polling as the Settings screen is shown/hidden. Also
   // refresh when the window regains focus so the user toggling in System

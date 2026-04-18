@@ -317,6 +317,31 @@ fn open_permission_pane(kind: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Reveal the embedded daemon binary in Finder so the user can drag-and-drop
+/// it into the Accessibility list (macOS won't populate the list unless the
+/// app has been granted or prompted — on a fresh bundled install, neither
+/// has happened yet). `open -R` selects the file in Finder.
+#[tauri::command]
+fn reveal_daemon_binary(app: tauri::AppHandle) -> Result<String, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resolve resource dir: {}", e))?;
+    let daemon_bin = resource_dir.join("resources").join("brainloopd");
+    if !daemon_bin.exists() {
+        return Err(format!(
+            "daemon binary not found at {} (dev mode?)",
+            daemon_bin.display()
+        ));
+    }
+    Command::new("open")
+        .arg("-R")
+        .arg(&daemon_bin)
+        .status()
+        .map_err(|e| format!("open -R: {}", e))?;
+    Ok(daemon_bin.display().to_string())
+}
+
 #[derive(Serialize)]
 struct AiConfig {
     provider: String,
@@ -560,7 +585,8 @@ fn main() {
             ai_config_load,
             ai_config_save,
             permissions_status,
-            open_permission_pane
+            open_permission_pane,
+            reveal_daemon_binary
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
