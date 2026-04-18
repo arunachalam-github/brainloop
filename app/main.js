@@ -127,10 +127,13 @@ function wireTabs() {
 //
 // Last painted layout is stashed on the canvas so the hover handler can
 // hit-test without recomputing.
-const STATE_FREQ  = { empty: 0,   calm: 1.6, busy: 4.0,  chaotic: 9.0 };
-const STATE_AMP   = { empty: 0,   calm: 0.07, busy: 0.26, chaotic: 0.70 };
-const STATE_SPEED = { empty: 0,   calm: 0.35, busy: 0.9,  chaotic: 1.8 };
-const PTS_PER_BUCKET = 60;
+// Per-state parameters ported verbatim from the Stitch reference so the
+// wave reads as clean sinusoids rather than noise. Two things matter:
+//   - Nyquist: the chaotic freq range (8–16 cycles/bucket) needs at least
+//     ~6 pts/cycle to render smoothly, so PTS_PER_BUCKET must be ~100.
+//   - Speed is in radians/sec of phase drift. Calm barely breathes,
+//     chaotic visibly flows.
+const PTS_PER_BUCKET = 100;
 
 // Tiny deterministic PRNG so repaints on resize keep the same phases.
 function mulberry32(seed) {
@@ -166,13 +169,30 @@ function paintWaveform(canvas, buckets) {
 
   // Per-bucket parameters: frequency, amplitude, scroll speed, two random
   // phase offsets so neighbouring chaotic buckets don't read as one cosine.
+  // Reference-target visual density: roughly one visible cycle per bucket
+  // for busy, two for chaotic. At ~12 px bucket width that yields 4–8 px per
+  // cycle — enough room for the stroke to trace a legible sine rather than
+  // collapsing into vertical streaks. Amplitude caps at ~55% of halfH so
+  // peaks don't touch the canvas edges.
   const rnd = mulberry32(137);
   const params = buckets.map(b => {
     const state = b?.state || 'empty';
     const tN    = (b?.count || 0) / maxCount;
-    const freq  = state === 'empty' ? 0 : STATE_FREQ[state] + tN * STATE_FREQ[state] * 0.5;
-    const amp   = state === 'empty' ? 0 : halfH * STATE_AMP[state] * (0.75 + tN * 0.35);
-    const speed = STATE_SPEED[state] * (0.8 + tN * 0.4);
+    const freq =
+      state === 'empty'   ? 0 :
+      state === 'calm'    ? 0.5 + tN * 0.4 :
+      state === 'busy'    ? 1.0 + tN * 0.8 :
+      /* chaotic */         2.0 + tN * 2.0;
+    const amp =
+      state === 'empty'   ? 0 :
+      state === 'calm'    ? halfH * (0.06 + tN * 0.06) :
+      state === 'busy'    ? halfH * (0.18 + tN * 0.14) :
+      /* chaotic */         halfH * (0.32 + tN * 0.22);
+    const speed =
+      state === 'calm'    ? 0.35 + tN * 0.20 :
+      state === 'busy'    ? 0.60 + tN * 0.40 :
+      state === 'chaotic' ? 1.10 + tN * 0.70 :
+      /* empty */           0;
     return { freq, amp, speed, ph1: rnd() * Math.PI * 2, ph2: rnd() * Math.PI * 2, state };
   });
 
