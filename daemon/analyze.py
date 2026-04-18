@@ -298,12 +298,24 @@ def build_context(
     # AI-wait signals: Claude Code / Cursor spinner window_titles.
     ai_waits = _extract_ai_waits(heartbeat_rows, tz=tz)
 
+    # Expose the real wake moment so the LLM doesn't fabricate "Early
+    # morning" / "Mid-morning" acts over a sleep window. _find_wake_ts
+    # already handles the "active past midnight, then slept late" case
+    # (user's session from 00:05-00:22 followed by a 10h lock → wake at
+    # the post-lock unlock time, not the pre-midnight tail).
+    wake_ts = _find_wake_ts(rows)
+    if wake_ts == float("inf"):
+        wake_hhmm = ""
+    else:
+        wake_hhmm = datetime.fromtimestamp(wake_ts, tz=tz).strftime("%H:%M")
+
     now_dt = datetime.fromtimestamp(now_ts, tz=tz)
     return {
         "date": date_str,
         "timezone": str(tz),
         "weekday": now_dt.strftime("%A").lower(),
         "now_hhmm": now_dt.strftime("%H:%M"),
+        "wake_hhmm": wake_hhmm,
         "total_rows": len(rows),
         "switches_total": switches_total,
         "intensity_buckets": buckets,

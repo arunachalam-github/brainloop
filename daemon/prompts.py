@@ -58,12 +58,24 @@ Structure:
 - headline: one or two sentences, editorial, specific to today's events.
   If any entertainment happened, include the word "monkey" (see above).
 - subtitle: lowercase "{weekday}, {month} {day} · {N} switches · {H}h{M} focus"
-- acts: 2-4 entries. Each has title (Early morning / Mid-morning / Afternoon
-  / Evening / Now — pick whatever fits), a time_range, one_liner, narrative
-  (2-3 sentences), and 0-2 callouts. Callouts highlight specific blocks —
+- acts: 3-5 entries covering the user's ACTIVE portion of the day —
+  i.e. from the WOKE UP time shown in the context through "now". NEVER
+  produce an act with a time_range that starts before the WOKE UP
+  time, even if "Early morning" or "Mid-morning" would otherwise be
+  appropriate — those hours were sleep. Pick titles from {Early
+  morning, Mid-morning, Late morning, Midday, Afternoon, Late
+  afternoon, Evening, Night, Now} that match the actual clock time of
+  the block. Each act should span roughly 1-3 hours; NEVER
+  compress more than 3 hours of active work into a single act unless
+  the user did one continuous thing the whole time (e.g. a 4-hour
+  coding session with no context switches). If the active window is
+  shorter than 2 hours, fewer acts are okay (minimum 1). The final
+  act should always be titled "Now" and end at the current time.
+  Each act has title, time_range, one_liner, narrative (2-3 sentences),
+  and 0-2 callouts. Callouts highlight specific blocks —
   GRATIFICATION MONKEY for entertainment, "FOCUS" or "CALL" for other
-  notable blocks. Gratification monkey callouts are REQUIRED for any act
-  with >= 5 minutes of entertainment consumption.
+  notable blocks. Gratification monkey callouts are REQUIRED for any
+  act with >= 5 minutes of entertainment consumption.
 - widgets: fill every field from the context; if the day has no calls,
   on_calls.count is 0 (not missing).
 - intensity_buckets: pass through the provided buckets verbatim.
@@ -139,7 +151,8 @@ PAYLOAD_SCHEMA = {
             },
             "acts": {
                 "type": "array",
-                "minItems": 1,
+                "minItems": 2,
+                "maxItems": 5,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -291,6 +304,8 @@ def user_message(context: dict) -> str:
         f"DATE: {context['date']} ({context['weekday']})\n"
         f"TIMEZONE: {context['timezone']}\n"
         f"NOW: {context['now_hhmm']} local time\n"
+        f"WOKE UP: {context.get('wake_hhmm') or 'unknown'} — do NOT narrate "
+        "any act before this time. Everything earlier is sleep.\n"
         f"TOTAL SWITCHES: {context['switches_total']}\n\n"
         "INTENSITY BUCKETS (10-min buckets, state = empty/calm/busy/chaotic):\n"
         f"{json.dumps(context['intensity_buckets'], indent=2)}\n\n"
