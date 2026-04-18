@@ -780,6 +780,20 @@ async function refreshPermissions() {
   }
 }
 
+// Polling interval while the Settings tab is open. 5s is a good tradeoff:
+// fast enough to feel live when the user toggles a System Settings checkbox,
+// slow enough not to hammer the DB. Cleared when the tab is not visible.
+let _permPollTimer = null;
+
+function startPermPolling() {
+  if (_permPollTimer) return;
+  refreshPermissions();  // fire immediately
+  _permPollTimer = setInterval(refreshPermissions, 5000);
+}
+function stopPermPolling() {
+  if (_permPollTimer) { clearInterval(_permPollTimer); _permPollTimer = null; }
+}
+
 function wirePermissions() {
   document.querySelectorAll('.perm-open').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -792,10 +806,21 @@ function wirePermissions() {
   const recheck = document.getElementById('perm-recheck');
   if (recheck) recheck.addEventListener('click', refreshPermissions);
 
-  // Initial fetch + re-check when the user tabs away from the app and
-  // comes back (they just toggled a setting).
-  refreshPermissions();
-  window.addEventListener('focus', refreshPermissions);
+  // Start/stop polling as the Settings screen is shown/hidden. Also
+  // refresh when the window regains focus so the user toggling in System
+  // Settings and cmd-tabbing back gets an immediate update.
+  const settingsScreen = document.getElementById('screen-settings');
+  if (settingsScreen) {
+    const obs = new MutationObserver(() => {
+      if (settingsScreen.classList.contains('active')) startPermPolling();
+      else stopPermPolling();
+    });
+    obs.observe(settingsScreen, { attributes: true, attributeFilter: ['class'] });
+    if (settingsScreen.classList.contains('active')) startPermPolling();
+  } else {
+    refreshPermissions();
+  }
+  window.addEventListener('focus', () => { if (_permPollTimer) refreshPermissions(); });
 }
 
 // Format a "running since HH:MM" or "silent for N min" line for the

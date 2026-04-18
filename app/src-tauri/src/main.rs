@@ -216,33 +216,24 @@ fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
 
 #[derive(Serialize)]
 struct PermissionsStatus {
-    accessibility: String,        // "granted" | "not_granted" | "unknown"
-    apple_events_chrome: String,  // same
-    screen_recording: String,     // always "optional" — we don't use it
+    accessibility: String,     // "granted" | "not_granted" | "unknown"
+    screen_recording: String,  // always "optional" — we don't use it
 }
 
-/// Best-effort detection of the macOS permissions the daemon needs.
+/// Best-effort Accessibility detection for the daemon.
 ///
-/// We don't call AXIsProcessTrusted() directly (it would return status for
-/// the UI binary, not the daemon binary — different processes, different
-/// TCC entries). Instead we read recent capture behavior from the DB:
-///
-/// - Accessibility: look at the last 50 heartbeat rows. If any of them
-///   have a non-empty window_title AND a non-loginwindow app_name, the
-///   AX APIs are returning data → permission is granted for the daemon.
-///   If every recent heartbeat has window_title NULL, AX is blocked.
-///
-/// - Chrome Apple Events: look at the last 200 rows where app_name is
-///   one of the Chrome-family browsers. If any has a non-empty page_text,
-///   the AppleScript JS injection is working → granted. If the user hasn't
-///   been in Chrome recently we report "unknown" rather than "not_granted".
-///
-/// - Screen Recording: we don't use it. Always "optional".
+/// We don't call AXIsProcessTrusted() directly — TCC grants are per-binary
+/// and the UI and daemon are different binaries, so the UI's self-check
+/// wouldn't tell us anything about the daemon. Instead we read capture
+/// behavior from the DB: the last 50 heartbeat rows. If any of them have
+/// a non-empty window_title AND a non-loginwindow app_name, the AX APIs
+/// are returning data → granted. If app_name is set but window_title is
+/// always NULL, AX is blocked (NSWorkspace still works without AX, so we
+/// see the app name but not the window title).
 #[tauri::command]
 fn permissions_status() -> Result<PermissionsStatus, String> {
     let mut out = PermissionsStatus {
         accessibility: "unknown".into(),
-        apple_events_chrome: "unknown".into(),
         screen_recording: "optional".into(),
     };
     let path = db_path();
@@ -251,7 +242,6 @@ fn permissions_status() -> Result<PermissionsStatus, String> {
     }
     let conn = open_read_only()?;
 
-    // Accessibility heuristic.
     let mut stmt = conn
         .prepare(
             "SELECT window_title, app_name FROM activity_log
@@ -287,37 +277,7 @@ fn permissions_status() -> Result<PermissionsStatus, String> {
     } else if saw_non_login {
         "not_granted".into()
     } else {
-        // only loginwindow rows — user is locked or hasn't used the Mac yet
         "unknown".into()
-    };
-
-    // Chrome Apple Events heuristic. Only speak when we have Chrome-family
-    // rows to look at — otherwise report "unknown" (no signal).
-    let mut stmt2 = conn
-        .prepare(
-            "SELECT page_text FROM activity_log
-             WHERE app_name IN ('Google Chrome','Chromium','Brave Browser','Arc','Vivaldi')
-             ORDER BY ts DESC LIMIT 200",
-        )
-        .map_err(|e| e.to_string())?;
-    let mut total_chrome = 0;
-    let mut any_text = false;
-    for r in stmt2
-        .query_map([], |row| row.get::<_, Option<String>>(0))
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-    {
-        total_chrome += 1;
-        if r.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
-            any_text = true;
-        }
-    }
-    out.apple_events_chrome = if total_chrome == 0 {
-        "unknown".into()
-    } else if any_text {
-        "granted".into()
-    } else {
-        "not_granted".into()
     };
 
     Ok(out)
