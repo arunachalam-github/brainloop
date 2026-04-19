@@ -143,6 +143,41 @@ def tick(conn: sqlite3.Connection, now_ts: float | None = None, force: bool = Fa
     )
 
 
+# ── Manual refresh (UI-triggered) ─────────────────────────────────────────────
+
+def check_manual_request(conn: sqlite3.Connection, now_ts: float | None = None) -> None:
+    """Observe + serve a pending manual-refresh request from the UI.
+
+    The Tauri command `analyze_now` writes `analyze_requested_at = <unix_ts>`
+    into app_config. We compare against `analyze_served_at` and, if a request
+    is pending, run one forced tick and stamp served_at to the request ts.
+    Silent on any error — the 30-min timer continues regardless.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT key, value FROM app_config "
+            "WHERE key IN ('analyze_requested_at','analyze_served_at')"
+        ).fetchall()
+        kv = {k: v for k, v in rows}
+        req = int(kv.get("analyze_requested_at") or 0)
+        served = int(kv.get("analyze_served_at") or 0)
+        if req == 0 or req <= served:
+            return
+        log.info("manual analyzer request seen (req=%d served=%d)", req, served)
+        tick(conn, now_ts=now_ts, force=True)
+        # Stamp served_at even when tick returned early (no key, idle, etc.)
+        # so we don't re-fire on the same request every 5s. The UI's poll
+        # timeout is how the user sees the failure.
+        conn.execute(
+            "INSERT INTO app_config(key,value) VALUES('analyze_served_at',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(req),),
+        )
+        conn.commit()
+    except Exception:
+        log.exception("check_manual_request raised — suppressing")
+
+
 # ── Payload sanitizer ─────────────────────────────────────────────────────────
 
 _BROWSER_SOURCES = {

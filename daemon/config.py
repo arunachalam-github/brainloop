@@ -25,6 +25,7 @@ DETECT_AUDIO               = True   # Set False to disable CoreAudio listeners e
 # ── Analyzer (LLM day-summary generator) ─────────────────────────────────────
 ANALYZER_INTERVAL_SECS     = 1800   # 30 min — one LLM call per tick (if not gated out)
 ANALYZER_FIRST_DELAY_SECS  = 60     # let capture warm up before the first analyzer run
+ANALYZER_MANUAL_POLL_SECS  = 5      # poll app_config for UI-triggered manual refresh requests
 ANALYZER_IDLE_SKIP_MINS    = 120    # skip tick if last activity row is older than this
 ANALYZER_MIN_REGEN_SECS    = 1200   # ignore a tick if we ran within the last 20 min
 ANALYZER_MAX_DWELLS        = 20     # cap on browser dwells sent to LLM per call

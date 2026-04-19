@@ -30,6 +30,7 @@ from .config import (
     DB_PATH,
     ANALYZER_INTERVAL_SECS,
     ANALYZER_FIRST_DELAY_SECS,
+    ANALYZER_MANUAL_POLL_SECS,
 )
 from . import db as _db
 from . import analyze as _analyze
@@ -73,6 +74,20 @@ def _analyzer_cb(timer, info) -> None:
         _analyze.tick(conn)
     except Exception:
         log.exception("analyzer tick raised — suppressing to keep capture alive")
+
+
+# ── Manual-refresh poll timer ────────────────────────────────────────────────
+# Fires every ANALYZER_MANUAL_POLL_SECS. Serves UI-triggered refresh requests
+# written into app_config by the Tauri `analyze_now` command.
+
+def _manual_refresh_cb(timer, info) -> None:
+    try:
+        conn = _db._db
+        if conn is None:
+            return
+        _analyze.check_manual_request(conn)
+    except Exception:
+        log.exception("manual-refresh poll raised — suppressing")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -144,6 +159,22 @@ def main() -> None:
         "analyzer timer armed: first fire in %ds, then every %ds",
         ANALYZER_FIRST_DELAY_SECS, ANALYZER_INTERVAL_SECS,
     )
+
+    # Manual-refresh poll (fast cadence) — reads app_config to see if the UI
+    # asked for an immediate summary regeneration.
+    manual_refresh_timer = CF.CFRunLoopTimerCreate(
+        None,
+        CF.CFAbsoluteTimeGetCurrent() + ANALYZER_MANUAL_POLL_SECS,
+        ANALYZER_MANUAL_POLL_SECS,
+        0,
+        0,
+        _manual_refresh_cb,
+        None,
+    )
+    CF.CFRunLoopAddTimer(
+        CF.CFRunLoopGetCurrent(), manual_refresh_timer, CF.kCFRunLoopDefaultMode
+    )
+    log.info("manual-refresh poll armed: every %ds", ANALYZER_MANUAL_POLL_SECS)
 
     # Graceful shutdown on SIGTERM / SIGINT
     rl = CF.CFRunLoopGetCurrent()
