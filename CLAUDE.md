@@ -255,9 +255,12 @@ GROUP BY idx ORDER BY idx;
 ```
 
 Build the full 48-slot array (idx 0–47) with zeros for empty slots — the chart renders all 48 bars:
+
+**IMPORTANT:** `apps` must be a Python list, not the raw `GROUP_CONCAT` string. Split the DB value before storing, or the chart tooltip will throw `b.apps.join is not a function`.
+
 ```python
 raw = { row['idx']: row for row in bucket_query_results }
-buckets = [{"idx": i, "count": raw.get(i, {}).get("count", 0), "apps": raw.get(i, {}).get("apps", [])} for i in range(48)]
+buckets = [{"idx": i, "count": raw.get(i, {}).get("count", 0), "apps": raw.get(i, {}).get("apps", "").split(",") if raw.get(i, {}).get("apps") else []} for i in range(48)]
 ```
 
 #### 3. Time spent per app (heartbeats × 60s)
@@ -614,6 +617,26 @@ Default viz mode: `seismo` (set by `TWEAK_DEFAULTS` in the template).
 ### Period summary text typography
 
 `.period-line1` and `.period-line2` use `var(--body)` (Inter Tight) — same as the rest of the body text. No italics.
+
+### Hero phrase typography
+
+`.hero-phrase` (renders `meta.dayInAPhrase`) uses the native template CSS — no override needed:
+
+```css
+.hero-phrase {
+  font-family: var(--display);           /* Instrument Serif */
+  font-size: clamp(22px, 2.8vw, 42px);  /* responsive */
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  max-width: 60vw;
+}
+.hero-phrase em {
+  font-style: italic;
+  color: var(--monkey);                  /* terracotta — wraps the word "monkey" */
+}
+```
+
+`max-width` is overridden to `60vw` via a `DOMContentLoaded` script in the template (the bundled JS injects its own stylesheet at runtime, so a post-mount script is needed to win specificity).
 
 **No italics anywhere in period text.** The monkey sentence (`.monkey-sentence`) is `font-style: normal`.
 
