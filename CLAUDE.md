@@ -190,13 +190,16 @@ window.BRAINLOOP_DATA = {
 };
 ```
 
-**windowStartMs** — midnight in the user's local timezone:
+**windowStartMs** — must equal the epoch used in the bucket SQL query so bar positions align with the x-axis labels. Use local midnight (IST):
 ```python
 from datetime import datetime, timezone, timedelta
-IST = timezone(timedelta(hours=5, minutes=30))  # adjust for other timezones
+IST = timezone(timedelta(hours=5, minutes=30))  # adjust for other timezone
 midnight = datetime(YYYY, MM, DD, 0, 0, 0, tzinfo=IST)
 windowStartMs = int(midnight.timestamp() * 1000)
+# e.g. Apr 19 2026 IST midnight → 1776537000000
 ```
+
+**CRITICAL — bucket epoch must match windowStartMs:** The bucket `idx` SQL must use the same midnight epoch. Use the unix timestamp of local midnight, not `strftime('%s','YYYY-MM-DD 00:00:00')` (which is UTC midnight). See query 2 below.
 
 ### DB queries to populate the data
 
@@ -224,19 +227,37 @@ ORDER BY ts DESC LIMIT 3;
 
 #### 2. Total switches + 30-min buckets (seismo chart)
 
-```sql
--- Total
-SELECT COUNT(*) FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00') AND trigger='app_switch';
+**IMPORTANT:** Use the unix timestamp of local midnight as the bucket epoch — NOT `strftime('%s','YYYY-MM-DD 00:00:00')` (that is UTC midnight, which for IST is 5h30m off). This epoch must match `windowStartMs` exactly, or the chart bars will appear at the wrong time of day.
 
--- Per 30-min bucket
+For IST (UTC+5:30), local midnight = `YYYY-MM-DD 00:00:00 IST` = `YYYY-MM-DD` previous day `18:30:00 UTC`.
+
+```python
+# Compute local midnight epoch once, use in all bucket queries
+from datetime import datetime, timezone, timedelta
+IST = timezone(timedelta(hours=5, minutes=30))
+midnight_epoch = int(datetime(YYYY, MM, DD, 0, 0, 0, tzinfo=IST).timestamp())
+# e.g. Apr 19 2026 → 1776537000
+```
+
+```sql
+-- Total (replace MIDNIGHT_EPOCH with computed value, e.g. 1776537000)
+SELECT COUNT(*) FROM activity_log
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400 AND trigger='app_switch';
+
+-- Per 30-min bucket — idx 0 = midnight local, idx 14 = 07:00 IST, etc.
 SELECT
-  CAST((ts - strftime('%s','YYYY-MM-DD 00:00:00')) / 1800 AS INTEGER) as idx,
+  CAST((ts - MIDNIGHT_EPOCH) / 1800 AS INTEGER) as idx,
   COUNT(*) as count,
   GROUP_CONCAT(DISTINCT app_name) as apps
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00') AND trigger='app_switch'
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400 AND trigger='app_switch'
 GROUP BY idx ORDER BY idx;
+```
+
+Build the full 48-slot array (idx 0–47) with zeros for empty slots — the chart renders all 48 bars:
+```python
+raw = { row['idx']: row for row in bucket_query_results }
+buckets = [{"idx": i, "count": raw.get(i, {}).get("count", 0), "apps": raw.get(i, {}).get("apps", [])} for i in range(48)]
 ```
 
 #### 3. Time spent per app (heartbeats × 60s)
