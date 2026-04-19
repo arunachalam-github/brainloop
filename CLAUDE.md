@@ -546,6 +546,15 @@ ORDER BY typing_events DESC;
 2. **productive.headline** — what the user spent the most focused time doing. Check queries 3, 7, 10 — Code/Cursor/Xcode heartbeats, Docs/Sheets, AI sessions. Confirm with query 14 (typing events) — typing in Code = coding, typing in Claude = prompting. If any period had multiple distinct activities, write 2–4 lines to cover them — applies to all periods, not just morning. Do not compress everything into one sentence. Only expand when the content actually fills it.
 3. **openedWith** — the very first thing in that period from the app_switch timeline (query 1). Can be 2–4 lines across any period if there's enough to note.
 4. **monkey.trail** — query 5 (audio playing) + query 4 social/video + ecommerce categories. These are distraction moments.
+
+   **Trail rule:** Include ALL titles from query 5 (audio_playing=1, title_changed) — even brief skips of a few seconds. The trail is the complete record of what the monkey touched; no dwell-time filter. `what` = content title, `where` = platform name (YouTube, Facebook, Spotify, etc.).
+
+   **monkey.story writing rules:** Write in **third-person deadpan observer** voice. Always say **"The gratification monkey"**, never just "The monkey". Never mention time, duration, or "in the background". Never name the app/platform in `story` — platform names live in `trail[].where` only. Anchor on **focused content** (most heartbeats with audio_playing=1 AND frontmost window). Dwell-time audio belongs in trail but NOT as the story anchor. Name 1–2 focused items then trail off with "and more".
+   - Good: "The gratification monkey went from Wagon R to Sathuranga Vettai and more."
+   - Good: "The gratification monkey started with Yennai Arindhal and never really stopped."
+   - Bad: "The monkey went from Wagon R to Sathuranga Vettai and more." (missing "gratification")
+   - Bad: "Wagon R restoration, LKG comedy, Avvai Shanmugi and more on YouTube." (names platform)
+   - Bad: "Sathuranga Vettai ran in the background for 74 minutes from 08:16 to 09:30."
 5. **widgets.reading** — query 4 rows classified as Article, Email, GitHub, Docs, Discovery + query 9 AI platform titles. **Enrich with query 12 `content_snippet`** — use actual page text to describe what was read, not just the tab title.
 6. **widgets.appHours** — query 3 heartbeats → minutes, top 4–5 apps.
 7. **widgets.doomScroll** — Social + Video + Ecommerce minutes from queries 4+5, count distinct moments, worst window.
@@ -555,17 +564,26 @@ ORDER BY typing_events DESC;
 
 ### dayInAPhrase rules
 
-Write 3–4 crisp deadpan sentences. No em dashes. No metaphors not grounded in what actually happened.
+Write **3–4 sentences**. **Never use em dashes ( — ).**
 
 Structure:
-1. What carried over or how the day opened (specific, real — verify from DB)
-2. What the first real activity was (specific app/content)
-3. The main work done
-4. The monkey punchline — punchy, self-aware, a little dark
+1. **Label the day** — one short sentence: "A building day.", "A slow morning.", "A reading session.", "A scattered one."
+2. **What was read/consumed** — actual content titles or topics, flowing sequence. Name the content, not the app. Focused attention only (heartbeats while frontmost, or deliberate multi-tab reading). Skip dwell-time background apps (Spotify pinned tab, YouTube audio continuing while doing other work).
+3. **What was built/worked on** — main productive output, one clause.
+4. **Gratification monkey line** — always say "gratification monkey", never just "monkey". Content names only, no platform names, narrative arc + "and more" tease.
 
-**Always query the DB for the actual first activity before writing.** The first heartbeat row of the day tells you what was open when the screen woke up.
+**Focused attention vs dwell time:** Focused = heartbeats in that window while frontmost. Dwell = audio/app running in background while user is elsewhere. Dwell-time content belongs in monkey trail only, not in sentences 2–3.
 
-Example: `"Closed the Stericycle call at midnight. Woke up to Yennai Arindhal. Built brainloop all day. The monkey clocked more hours than the work did."`
+**Good (approved canonical example):**
+> "A building day. Read about AI making you dumber, then Karpathy's second brain on Substack. Built brainloop all morning. The gratification monkey went from Wagon R to Sathuranga Vettai and more."
+
+**Bad — too zoomed out, loses the day's identity:**
+> "A building day. Brainloop took shape, inbox got cleared. The monkey kept Sathuranga Vettai warm the whole time."
+
+**Bad — task log, names apps not content:**
+> "Opened the day with yesterday's report still on screen. Read Karpathy's second brain on Substack and got to inbox zero. Built brainloop with Claude Code all morning..."
+
+**Always query the DB for the actual first activity before writing.** The first non-loginwindow heartbeat row tells you what was open when the screen woke up.
 
 ### Section label wording (exact)
 
@@ -593,10 +611,18 @@ Seismo chart fill colors (context-switch density):
 
 Default viz mode: `seismo` (set by `TWEAK_DEFAULTS` in the template).
 
+### Period summary text typography
+
+`.period-line1` and `.period-line2` use `var(--body)` (Inter Tight) — same as the rest of the body text. No italics.
+
+**No italics anywhere in period text.** The monkey sentence (`.monkey-sentence`) is `font-style: normal`.
+
 ### Monkey sentence logic (auto-generated from trail)
 
-The `monkeySentence()` function in the JSX groups `trail` entries by `where` platform and produces one italic sentence per period:
+The `monkeySentence()` function in the JSX groups `trail` entries by `where` platform and produces one sentence per period:
 
-> "Watched Yennai Arindhal – Sathyadev scenes, Theeran – movie scenes on YouTube — Facebook Reels – Max Alexander on Facebook."
+> "Watched Yennai Arindhal – Sathyadev scenes, Theeran – movie scenes on YouTube, Facebook Reels – Max Alexander on Facebook."
 
 Fill `trail[].where` with the platform name (`"YouTube"`, `"Facebook"`, `"Instagram"`, etc.) so the sentence renders correctly. Items where `where === '-'` or `what === 'Call ended'` are filtered out.
+
+**No em dashes in the monkey sentence** — platform groups are joined with `, ` (comma-space), not ` — `.
