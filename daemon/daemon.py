@@ -31,9 +31,11 @@ from .config import (
     ANALYZER_INTERVAL_SECS,
     ANALYZER_FIRST_DELAY_SECS,
     ANALYZER_MANUAL_POLL_SECS,
+    CHAT_POLL_SECS,
 )
 from . import db as _db
 from . import analyze as _analyze
+from . import chat as _chat
 from .capture.ax import get_active_app
 from .capture import observer as _observer
 from .capture import workspace as _workspace
@@ -88,6 +90,20 @@ def _manual_refresh_cb(timer, info) -> None:
         _analyze.check_manual_request(conn)
     except Exception:
         log.exception("manual-refresh poll raised — suppressing")
+
+
+# ── Chat poll timer ──────────────────────────────────────────────────────────
+# Short cadence poll for pending user turns in chat_messages. One LLM tool-use
+# loop per call — see daemon.chat.check_pending.
+
+def _chat_cb(timer, info) -> None:
+    try:
+        conn = _db._db
+        if conn is None:
+            return
+        _chat.check_pending(conn)
+    except Exception:
+        log.exception("chat poll raised — suppressing")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -175,6 +191,21 @@ def main() -> None:
         CF.CFRunLoopGetCurrent(), manual_refresh_timer, CF.kCFRunLoopDefaultMode
     )
     log.info("manual-refresh poll armed: every %ds", ANALYZER_MANUAL_POLL_SECS)
+
+    # Chat poll (fast cadence) — serves UI-sent chat turns via tool-use loop.
+    chat_timer = CF.CFRunLoopTimerCreate(
+        None,
+        CF.CFAbsoluteTimeGetCurrent() + CHAT_POLL_SECS,
+        CHAT_POLL_SECS,
+        0,
+        0,
+        _chat_cb,
+        None,
+    )
+    CF.CFRunLoopAddTimer(
+        CF.CFRunLoopGetCurrent(), chat_timer, CF.kCFRunLoopDefaultMode
+    )
+    log.info("chat poll armed: every %ds", CHAT_POLL_SECS)
 
     # Graceful shutdown on SIGTERM / SIGINT
     rl = CF.CFRunLoopGetCurrent()

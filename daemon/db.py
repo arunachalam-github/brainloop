@@ -79,6 +79,29 @@ def open_db() -> sqlite3.Connection:
         )
     """)
 
+    # chat_messages: the Chat tab's conversation log. User turns arrive from
+    # the UI with status='pending'; the chat-poll timer in daemon.py picks
+    # them up, runs one LLM round with the run_sql tool, writes an assistant
+    # reply row, then flips the user row to status='done'. Conversation is
+    # persistent across sessions — the UI re-renders it on mount.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at      INTEGER NOT NULL,
+            role            TEXT    NOT NULL,
+            content         TEXT    NOT NULL,
+            tool_calls_json TEXT,
+            status          TEXT    NOT NULL DEFAULT 'done',
+            model           TEXT,
+            tokens_in       INTEGER,
+            tokens_out      INTEGER,
+            error           TEXT
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_status ON chat_messages(status, id)"
+    )
+
     # Migrations: add columns added after initial schema
     for col_def in (
         "page_text TEXT",

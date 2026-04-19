@@ -324,3 +324,80 @@ def user_message(context: dict) -> str:
         "AI-WAIT SIGNALS (Claude Code / Cursor spinner titles + dwell):\n"
         f"{json.dumps(context['ai_waits'], indent=2)}\n"
     )
+
+
+# ── Chat (run_sql-powered Q&A) ────────────────────────────────────────────────
+# Chat reuses CLAUDE.md as its schema + examples reference so any updates to
+# that file (new columns, new example queries) flow straight into the chat
+# model's behavior. In dev we read it from the repo root; in a bundled binary
+# PyInstaller stages it at sys._MEIPASS/CLAUDE.md (see build/brainloopd.spec).
+
+import os
+import sys
+from pathlib import Path
+
+
+def _load_claude_md() -> str:
+    """Return the content of CLAUDE.md, or a minimal fallback schema note."""
+    candidates: list[Path] = []
+    # PyInstaller bundle: CLAUDE.md lands alongside the executable's data files.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "CLAUDE.md")
+    # Dev / source run: two levels up from daemon/prompts.py.
+    candidates.append(Path(__file__).resolve().parent.parent / "CLAUDE.md")
+    for c in candidates:
+        try:
+            return c.read_text(encoding="utf-8")
+        except Exception:
+            continue
+    return (
+        "CLAUDE.md not found. Minimal schema: activity_log with columns "
+        "ts (unix float), ts_iso, trigger, app_name, bundle_id, window_title, "
+        "browser_url, page_text, visible_text, audio_playing (0/1), mic_active "
+        "(0/1). Use ts >= strftime('%s', date('now','localtime')) for today."
+    )
+
+
+CHAT_SCHEMA_DOC = _load_claude_md()
+
+CHAT_SYSTEM_PROMPT = (
+    "You are Brainloop's chat — an observer who can look at the user's Mac "
+    "activity log and answer questions about what they did.\n\n"
+    "You have one tool: run_sql(query). Use it to look up whatever you need "
+    "from activity.db. The schema + example queries + example questions are "
+    "in the DATABASE REFERENCE below. When you have enough data, respond in "
+    "2–5 short sentences — no headers, no bullet lists unless the question "
+    "is literally \"list X.\" Reference actual apps, titles, times. Be warm. "
+    "Don't lecture.\n\n"
+    "Always filter by `ts` (unix seconds) for time ranges. Today = "
+    "ts >= strftime('%s', date('now','localtime')). Keep queries focused — "
+    "you have a budget of 6 tool calls per answer. Prefer one well-aimed "
+    "query over several narrow ones.\n\n"
+    "If the question isn't about the user's computer activity, say so in one "
+    "line and offer a better one.\n\n"
+    "--- DATABASE REFERENCE ---\n"
+    + CHAT_SCHEMA_DOC
+)
+
+
+RUN_SQL_TOOL_SPEC = {
+    "name": "run_sql",
+    "description": (
+        "Run a single read-only SELECT or WITH query against the brainloop "
+        "activity.db (SQLite). Returns columns + rows (up to 200). Anything "
+        "other than SELECT/WITH is rejected. Use this to answer the user's "
+        "question about what they did."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "A single SELECT or WITH statement. No semicolons, no writes.",
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+}

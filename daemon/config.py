@@ -32,6 +32,13 @@ ANALYZER_MAX_DWELLS        = 20     # cap on browser dwells sent to LLM per call
 ANALYZER_PAGE_TEXT_CHARS   = 800    # per-dwell page_text slice budget (head 400 + tail 400)
 ANALYZER_KEYCHAIN_SERVICE  = "com.brainloop.ai"  # `security -s` label for the API key
 
+# ── Chat (SQL tool-use powered Q&A over activity_log) ────────────────────────
+CHAT_POLL_SECS             = 2      # how often the daemon looks for pending user turns
+CHAT_MAX_TOOL_CALLS        = 6      # SQL queries per user turn before we force an answer
+CHAT_MAX_HISTORY_TURNS     = 10     # prior user/assistant pairs replayed into the LLM
+CHAT_MAX_ROWS_PER_SQL      = 200    # cap rows returned from a single run_sql call
+CHAT_SQL_TIMEOUT_SECS      = 4      # per-query execution budget (sqlite interrupt)
+
 # ── Browser bundle IDs (for URL extraction via AX address bar) ────────────────
 BROWSER_BUNDLES: frozenset[str] = frozenset({
     # Mainstream

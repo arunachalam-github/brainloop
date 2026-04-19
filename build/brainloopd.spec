@@ -34,6 +34,10 @@ for pkg in (
     binaries += collected_binaries
     hiddenimports += collected_hidden
 
+# CLAUDE.md teaches the chat model the activity_log schema + example queries.
+# daemon.prompts._load_claude_md reads it from sys._MEIPASS at runtime.
+datas += [("../CLAUDE.md", ".")]
+
 
 a = Analysis(
     ["entry.py"],
