@@ -442,6 +442,174 @@ fn ai_config_save(
     Ok(())
 }
 
+/// Total on-disk size of the SQLite database, in bytes. Includes the main
+/// .db file plus the WAL and shm sidecars, since we use WAL mode and the
+/// WAL can grow substantially between checkpoints. Returns 0 when the DB
+/// doesn't exist yet (fresh install).
+#[tauri::command]
+fn db_size_bytes() -> Result<i64, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(0);
+    }
+    let mut total: u64 = 0;
+    for suffix in ["", "-wal", "-shm"] {
+        let p = if suffix.is_empty() {
+            path.clone()
+        } else {
+            let mut s = path.clone().into_os_string();
+            s.push(suffix);
+            std::path::PathBuf::from(s)
+        };
+        if let Ok(md) = std::fs::metadata(&p) {
+            total += md.len();
+        }
+    }
+    Ok(total as i64)
+}
+
+/// Export today's activity_log rows and day_summary row as a pretty-printed
+/// JSON file to ~/Desktop. Returns the written file path so the UI can show
+/// "Exported to ~/Desktop/brainloop-YYYY-MM-DD.json".
+#[tauri::command]
+fn export_today_json() -> Result<String, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found".into());
+    }
+    let conn = open_read_only()?;
+
+    // Compute today's local date string to match day_summary PK + UI expectation.
+    let date: String = conn
+        .query_row("SELECT date('now','localtime')", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+
+    // activity_log rows for today.
+    let mut stmt = conn
+        .prepare(
+            "SELECT ts, ts_iso, trigger, app_name, bundle_id, window_title,
+                    browser_url, page_text, visible_text, audio_playing,
+                    mic_active, audio_device, mic_device
+             FROM activity_log
+             WHERE ts >= strftime('%s', date('now','localtime'))
+             ORDER BY ts",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows_iter = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "ts": row.get::<_, f64>(0).unwrap_or(0.0),
+                "ts_iso": row.get::<_, Option<String>>(1).unwrap_or(None),
+                "trigger": row.get::<_, Option<String>>(2).unwrap_or(None),
+                "app_name": row.get::<_, Option<String>>(3).unwrap_or(None),
+                "bundle_id": row.get::<_, Option<String>>(4).unwrap_or(None),
+                "window_title": row.get::<_, Option<String>>(5).unwrap_or(None),
+                "browser_url": row.get::<_, Option<String>>(6).unwrap_or(None),
+                "page_text": row.get::<_, Option<String>>(7).unwrap_or(None),
+                "visible_text": row.get::<_, Option<String>>(8).unwrap_or(None),
+                "audio_playing": row.get::<_, Option<i64>>(9).unwrap_or(None),
+                "mic_active": row.get::<_, Option<i64>>(10).unwrap_or(None),
+                "audio_device": row.get::<_, Option<String>>(11).unwrap_or(None),
+                "mic_device": row.get::<_, Option<String>>(12).unwrap_or(None),
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    let activity: Vec<serde_json::Value> = rows_iter.filter_map(|r| r.ok()).collect();
+
+    // day_summary for today, if present.
+    let summary: Option<serde_json::Value> = conn
+        .query_row(
+            "SELECT generated_at, model, activity_rows, tokens_in, tokens_out, payload_json
+             FROM day_summary WHERE date = ?1",
+            [&date],
+            |row| {
+                let payload_json: String = row.get(5)?;
+                let payload: serde_json::Value =
+                    serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
+                Ok(serde_json::json!({
+                    "generated_at": row.get::<_, i64>(0)?,
+                    "model": row.get::<_, String>(1)?,
+                    "activity_rows": row.get::<_, i64>(2)?,
+                    "tokens_in": row.get::<_, Option<i64>>(3)?,
+                    "tokens_out": row.get::<_, Option<i64>>(4)?,
+                    "payload": payload,
+                }))
+            },
+        )
+        .ok();
+
+    let doc = serde_json::json!({
+        "date": date,
+        "exported_at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+        "activity_row_count": activity.len(),
+        "summary": summary,
+        "activity": activity,
+    });
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let out = std::path::PathBuf::from(home)
+        .join("Desktop")
+        .join(format!("brainloop-{}.json", date));
+    std::fs::write(&out, serde_json::to_vec_pretty(&doc).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("write: {}", e))?;
+    Ok(out.display().to_string())
+}
+
+/// Permanently wipe the activity_log and day_summary tables. Config (keys,
+/// provider) is preserved so the user doesn't have to re-enter it. Runs
+/// VACUUM afterwards to release disk space. The UI must confirm before
+/// calling this — there is no undo.
+#[tauri::command]
+fn delete_all_data() -> Result<(), String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found".into());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM activity_log", []).map_err(|e| e.to_string())?;
+    // day_summary may not exist on very old installs — ignore missing-table errors.
+    let _ = conn.execute("DELETE FROM day_summary", []);
+    // Also clear any pending manual-refresh markers so the daemon doesn't
+    // immediately try to regenerate a summary over the empty table.
+    let _ = conn.execute(
+        "DELETE FROM app_config WHERE key IN ('analyze_requested_at','analyze_served_at')",
+        [],
+    );
+    conn.execute("VACUUM", []).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Tell the daemon to regenerate today's summary now, bypassing its 30-min
+/// regen gate. We communicate through the shared SQLite — the daemon polls
+/// `app_config` on a short timer (see daemon/analyze.py::check_manual_request).
+/// Returns the request timestamp so the UI can track progress against
+/// `today_summary().generated_at`.
+#[tauri::command]
+fn analyze_now() -> Result<i64, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found — is the daemon installed?".into());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT INTO app_config(key,value) VALUES('analyze_requested_at',?1) \
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [now.to_string()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(now)
+}
+
 // ── First-launch daemon install ──────────────────────────────────────────────
 //
 // When the app starts from a bundled .app (say, /Applications/Brainloop.app),
@@ -586,7 +754,11 @@ fn main() {
             ai_config_save,
             permissions_status,
             open_permission_pane,
-            reveal_daemon_binary
+            reveal_daemon_binary,
+            analyze_now,
+            db_size_bytes,
+            export_today_json,
+            delete_all_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

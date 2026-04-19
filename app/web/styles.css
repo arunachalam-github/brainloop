@@ -83,9 +83,13 @@ a { color: inherit; }
 }
 
 .topbar {
-  display: flex;
+  /* 3-column grid keeps the tabs dead-centered even as the right-side
+     meta-group grows (e.g. when "REFRESHING…" appears next to the date).
+     With flex + space-between the center would drift whenever either
+     side's width changed. */
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: 26px 48px 0;
   gap: 32px;
   position: sticky;
@@ -94,6 +98,9 @@ a { color: inherit; }
   background: linear-gradient(to bottom, var(--cream) 0%, var(--cream) 70%, rgba(243,237,226,0) 100%);
   padding-bottom: 20px;
 }
+.topbar .wordmark    { justify-self: start; }
+.topbar .tabs        { justify-self: center; }
+.topbar .meta-group  { justify-self: end; }
 
 .wordmark {
   font-family: var(--display);
@@ -151,6 +158,41 @@ a { color: inherit; }
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+
+.meta-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.meta-refresh {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--ink-50);
+  transition: color 260ms var(--ease-calm), background 260ms var(--ease-calm);
+}
+.meta-refresh:hover { color: var(--ink-80); background: var(--ink-06); }
+.meta-refresh:disabled { cursor: default; opacity: 0.7; }
+.meta-refresh svg { width: 14px; height: 14px; display: block; }
+.meta-refresh.pending svg { animation: meta-spin 0.9s linear infinite; color: var(--monkey); }
+@keyframes meta-spin { to { transform: rotate(360deg); } }
+
+.refresh-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-50);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 500ms var(--ease-calm);
+  min-width: 0;
+  white-space: nowrap;
+}
+.refresh-status.show { opacity: 1; }
+.refresh-status.err  { color: var(--monkey); }
 
 /* ── Page container ─────────────────────────────────────────────────── */
 
@@ -891,9 +933,29 @@ a { color: inherit; }
 /* Data action buttons */
 .data-actions {
   display: flex;
+  align-items: center;
   gap: 12px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
+.data-status {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-50);
+  letter-spacing: 0.02em;
+  opacity: 0;
+  transition: opacity 500ms var(--ease-calm);
+  max-width: 100%;
+  word-break: break-all;
+}
+.data-status.show { opacity: 1; }
+.data-status.err  { color: var(--monkey); }
+.data-action.armed {
+  background: var(--monkey);
+  color: var(--cream);
+  border-color: var(--monkey);
+}
+.data-action:disabled { cursor: default; opacity: 0.55; }
 .data-action {
   padding: 10px 18px;
   border: 1px solid var(--ink-12);

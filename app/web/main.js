@@ -591,6 +591,7 @@ async function loadToday() {
   try {
     const summary = await invokeCmd('today_summary');
     if (summary && summary.payload) {
+      window.__lastSummaryGeneratedAt = summary.generated_at || 0;
       renderToday(root, summary);
       return;
     }
@@ -738,12 +739,104 @@ async function wireSettings() {
     });
   }
 
-  const exp = document.getElementById('btn-export-today');
-  const del = document.getElementById('btn-delete-all');
-  if (exp) exp.addEventListener('click', () => alert('Export today — coming soon.'));
-  if (del) del.addEventListener('click', () => alert('Delete all data — coming soon.'));
-
+  wireDataActions();
   wirePermissions();
+}
+
+// ─── Data actions (Export / Delete / DB size) ────────────────────────
+function humanSize(bytes) {
+  if (bytes == null || bytes === 0) return '—';
+  const units = ['B','KB','MB','GB'];
+  let n = bytes, i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i === 0 ? 0 : (n >= 10 ? 0 : 1))} ${units[i]}`;
+}
+
+async function refreshDbSize() {
+  const el = document.getElementById('db-size');
+  if (!el) return;
+  try {
+    const n = await invokeCmd('db_size_bytes');
+    el.value = humanSize(n);
+  } catch (_) {
+    el.value = '—';
+  }
+}
+
+function flashDataStatus(text, kind) {
+  const el = document.getElementById('data-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `data-status show${kind === 'err' ? ' err' : ''}`;
+  clearTimeout(el._fadeTimer);
+  el._fadeTimer = setTimeout(() => { el.className = 'data-status'; }, 4000);
+}
+
+function wireDataActions() {
+  refreshDbSize();
+  // Refresh the size number every time Settings becomes visible.
+  const settingsScreen = document.getElementById('screen-settings');
+  if (settingsScreen) {
+    const obs = new MutationObserver(() => {
+      if (settingsScreen.classList.contains('active')) refreshDbSize();
+    });
+    obs.observe(settingsScreen, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  const exp = document.getElementById('btn-export-today');
+  if (exp) exp.addEventListener('click', async () => {
+    if (exp.disabled) return;
+    exp.disabled = true;
+    flashDataStatus('Exporting…');
+    try {
+      const path = await invokeCmd('export_today_json');
+      flashDataStatus(`Saved to ${path}`);
+    } catch (e) {
+      flashDataStatus(`Export failed: ${e}`, 'err');
+    } finally {
+      exp.disabled = false;
+    }
+  });
+
+  const del = document.getElementById('btn-delete-all');
+  if (del) del.addEventListener('click', async () => {
+    if (del.disabled) return;
+    // Two-step confirmation: first click arms, second click confirms
+    // within 4 seconds. Blocks the most common accidental click.
+    if (!del.classList.contains('armed')) {
+      del.classList.add('armed');
+      del.textContent = 'Click again to confirm';
+      flashDataStatus('This will wipe activity + summaries. No undo.', 'err');
+      clearTimeout(del._armTimer);
+      del._armTimer = setTimeout(() => {
+        del.classList.remove('armed');
+        del.textContent = 'Delete all data';
+      }, 4000);
+      return;
+    }
+    clearTimeout(del._armTimer);
+    del.classList.remove('armed');
+    del.textContent = 'Delete all data';
+    del.disabled = true;
+    flashDataStatus('Deleting…');
+    try {
+      await invokeCmd('delete_all_data');
+      flashDataStatus('All activity + summaries deleted.');
+      await refreshDbSize();
+      // Also re-render Today so the empty state appears immediately.
+      try {
+        const root = document.getElementById('today-content');
+        if (root) {
+          window.__lastSummaryGeneratedAt = 0;
+          renderTodayEmpty(root, new Date(), 'no-data');
+        }
+      } catch (_) {}
+    } catch (e) {
+      flashDataStatus(`Delete failed: ${e}`, 'err');
+    } finally {
+      del.disabled = false;
+    }
+  });
 }
 
 // ─── Permissions row wiring ───────────────────────────────────────────
@@ -872,10 +965,88 @@ async function loadDaemonStatus() {
   }
 }
 
+// ─── Manual summary refresh ──────────────────────────────────────────
+// Writes a request timestamp into app_config (via Tauri `analyze_now`),
+// then polls `today_summary` until `generated_at` advances past the one we
+// remembered at click time. The daemon's short-cadence poll picks up the
+// request within ~5 seconds and writes a new day_summary row.
+function flashRefreshStatus(text, kind) {
+  const el = document.getElementById('refresh-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `refresh-status show${kind === 'err' ? ' err' : ''}`;
+  clearTimeout(el._fadeTimer);
+  el._fadeTimer = setTimeout(() => { el.className = 'refresh-status'; }, 3200);
+}
+
+function wireRefreshSummary() {
+  const btn = document.getElementById('btn-refresh-summary');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    if (btn.classList.contains('pending')) return;
+    btn.classList.add('pending');
+    btn.disabled = true;
+    flashRefreshStatus('Refreshing…');
+    const prev = window.__lastSummaryGeneratedAt || 0;
+    try {
+      await invokeCmd('analyze_now');
+    } catch (e) {
+      btn.classList.remove('pending');
+      btn.disabled = false;
+      flashRefreshStatus('Could not request refresh', 'err');
+      return;
+    }
+    const deadline = Date.now() + 35_000;
+    const poll = async () => {
+      if (Date.now() > deadline) {
+        btn.classList.remove('pending');
+        btn.disabled = false;
+        flashRefreshStatus('Timed out — check Settings', 'err');
+        return;
+      }
+      try {
+        const s = await invokeCmd('today_summary');
+        if (s && s.generated_at && s.generated_at > prev) {
+          window.__lastSummaryGeneratedAt = s.generated_at;
+          const root = document.getElementById('today-content');
+          if (root) renderToday(root, s);
+          btn.classList.remove('pending');
+          btn.disabled = false;
+          flashRefreshStatus('Updated');
+          return;
+        }
+      } catch (_) { /* keep polling */ }
+      setTimeout(poll, 1500);
+    };
+    setTimeout(poll, 1500);
+  });
+}
+
 // ─── Bootstrap ───────────────────────────────────────────────────────
 function setTopbarDate() {
   const meta = document.getElementById('meta-date');
   if (meta) meta.textContent = longDateLabel(new Date());
+}
+
+// Background auto-refresh: every 60s, check whether the daemon has written a
+// newer day_summary row (scheduled 30-min tick, or a manual refresh from a
+// prior session). If it has, re-render Today silently. Skips while a manual
+// refresh is already in-flight so we don't stomp on the click polling.
+function startAutoRefresh() {
+  setInterval(async () => {
+    const btn = document.getElementById('btn-refresh-summary');
+    if (btn && btn.classList.contains('pending')) return;
+    try {
+      const s = await invokeCmd('today_summary');
+      if (!s || !s.generated_at) return;
+      const prev = window.__lastSummaryGeneratedAt || 0;
+      if (s.generated_at > prev) {
+        window.__lastSummaryGeneratedAt = s.generated_at;
+        const root = document.getElementById('today-content');
+        if (root) renderToday(root, s);
+      }
+    } catch (_) { /* silent */ }
+  }, 60_000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -883,6 +1054,8 @@ document.addEventListener('DOMContentLoaded', () => {
   wireTabs();
   wireChat();
   wireSettings();
+  wireRefreshSummary();
   loadToday();
   loadDaemonStatus();
+  startAutoRefresh();
 });
