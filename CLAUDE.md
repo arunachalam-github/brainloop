@@ -543,8 +543,8 @@ ORDER BY typing_events DESC;
 ### How to synthesise all queries into the report
 
 1. **Periods** — divide the day into acts based on activity clusters. Use app_switch timeline + heartbeat counts to find natural breaks (long `loginwindow` gaps = away from desk). Default is 3 acts. Use 4–5 acts if the day spans more than 6 active hours and there is enough distinct content to justify more granularity. Never exceed 5 acts.
-2. **productive.headline** — what the user spent the most focused time doing. Check queries 3, 7, 10 — Code/Cursor/Xcode heartbeats, Docs/Sheets, AI sessions. Confirm with query 14 (typing events) — typing in Code = coding, typing in Claude = prompting.
-3. **openedWith** — the very first thing in that period from the app_switch timeline (query 1).
+2. **productive.headline** — what the user spent the most focused time doing. Check queries 3, 7, 10 — Code/Cursor/Xcode heartbeats, Docs/Sheets, AI sessions. Confirm with query 14 (typing events) — typing in Code = coding, typing in Claude = prompting. If any period had multiple distinct activities, write 2–4 lines to cover them — applies to all periods, not just morning. Do not compress everything into one sentence. Only expand when the content actually fills it.
+3. **openedWith** — the very first thing in that period from the app_switch timeline (query 1). Can be 2–4 lines across any period if there's enough to note.
 4. **monkey.trail** — query 5 (audio playing) + query 4 social/video + ecommerce categories. These are distraction moments.
 5. **widgets.reading** — query 4 rows classified as Article, Email, GitHub, Docs, Discovery + query 9 AI platform titles. **Enrich with query 12 `content_snippet`** — use actual page text to describe what was read, not just the tab title.
 6. **widgets.appHours** — query 3 heartbeats → minutes, top 4–5 apps.
