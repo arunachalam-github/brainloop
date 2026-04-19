@@ -658,6 +658,64 @@ a { color: inherit; }
   color: var(--monkey);
   font-style: italic;
 }
+.chat-msg.error {
+  align-self: flex-start;
+  background: var(--monkey-soft);
+  color: var(--monkey);
+  border: 1px solid var(--monkey-soft);
+  border-bottom-left-radius: 4px;
+  font-family: var(--body);
+}
+
+/* "New chat" button — pinned top-right of the chat hero. Clears history. */
+.chat-new {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 7px 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+  background: transparent;
+  border: 1px solid var(--ink-12);
+  border-radius: 999px;
+  transition: color 260ms var(--ease-calm), background 260ms var(--ease-calm), border-color 260ms var(--ease-calm);
+}
+.chat-new:hover {
+  color: var(--ink);
+  background: var(--ink-06);
+  border-color: var(--ink-25);
+}
+.chat-new:disabled { opacity: 0.55; cursor: default; }
+.chat-new svg { width: 12px; height: 12px; display: block; }
+/* "Thinking" bubble — three breathing dots while we wait for the LLM. */
+.chat-msg.pending {
+  align-self: flex-start;
+  background: var(--ink-06);
+  color: var(--ink);
+  border-bottom-left-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 14px 18px;
+}
+.chat-msg.pending .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--ink-40);
+  animation: chat-dot 1.2s var(--ease-breath) infinite;
+}
+.chat-msg.pending .dot:nth-child(2) { animation-delay: 0.18s; }
+.chat-msg.pending .dot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes chat-dot {
+  0%, 80%, 100% { opacity: 0.28; transform: translateY(0); }
+  40%           { opacity: 1;    transform: translateY(-2px); }
+}
 .chat-suggestions {
   display: flex;
   flex-direction: column;

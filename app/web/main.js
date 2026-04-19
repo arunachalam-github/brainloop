@@ -616,37 +616,128 @@ async function loadToday() {
   }
 }
 
-// ─── Chat (visual stub) ──────────────────────────────────────────────
-function wireChat() {
+// ─── Chat ────────────────────────────────────────────────────────────
+// User types → Tauri `chat_send` inserts a row into chat_messages with
+// status='pending'. The daemon's chat-poll timer (daemon/chat.py) picks it
+// up, runs a tool-use loop (the model can call run_sql against activity.db),
+// and writes an 'assistant' reply row. We poll chat_history every 1s for
+// new rows. Full conversation persists across app restarts.
+async function wireChat() {
   const body = document.getElementById('chat-body');
   const input = document.getElementById('chat-input');
   const send = document.getElementById('chat-send');
+  const newBtn = document.getElementById('btn-chat-new');
   const suggestions = document.getElementById('chat-suggestions');
+  let lastId = 0;
+  let pollTimer = null;
+  let seenPending = false;
+  // Preserve the initial greeting so "New chat" can restore it verbatim.
+  const initialGreeting = body.innerHTML;
 
-  function append(role, text) {
+  function appendRow(r) {
+    const cls = r.role === 'error' ? 'error'
+              : r.role === 'user'  ? 'user'
+              : 'bot';
     const el = document.createElement('div');
-    el.className = `chat-msg ${role}`;
-    el.textContent = text;
+    el.className = `chat-msg ${cls}`;
+    el.textContent = r.content;
     body.appendChild(el);
     body.scrollTop = body.scrollHeight;
   }
 
-  function submit(textIn) {
-    const text = (textIn ?? input.value).trim();
-    if (!text) return;
-    append('user', text);
-    input.value = '';
-    if (suggestions) suggestions.style.display = 'none';
-    setTimeout(() => append('bot', 'Chat is coming soon'), 600);
+  function appendPending() {
+    // Remove any existing pending bubble first.
+    body.querySelector('.chat-msg.pending')?.remove();
+    const el = document.createElement('div');
+    el.className = 'chat-msg bot pending';
+    el.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+    body.appendChild(el);
+    body.scrollTop = body.scrollHeight;
   }
 
-  if (send) send.addEventListener('click', () => submit());
-  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  if (suggestions) {
-    suggestions.querySelectorAll('.chat-suggestion').forEach(btn => {
-      btn.addEventListener('click', () => submit(btn.textContent.trim()));
-    });
+  function removePending() {
+    body.querySelector('.chat-msg.pending')?.remove();
   }
+
+  async function loadInitial() {
+    try {
+      const rows = await invokeCmd('chat_history', { sinceId: 0 });
+      body.innerHTML = '';
+      rows.forEach(r => { appendRow(r); lastId = Math.max(lastId, r.id); });
+      if (rows.length > 0 && suggestions) suggestions.style.display = 'none';
+      seenPending = rows.some(r => r.role === 'user' && r.status === 'pending');
+      if (seenPending) appendPending();
+    } catch (_) { /* first run — table may not exist yet */ }
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+      try {
+        const rows = await invokeCmd('chat_history', { sinceId: lastId });
+        let gotAssistantOrError = false;
+        rows.forEach(r => {
+          appendRow(r);
+          lastId = Math.max(lastId, r.id);
+          if (r.role === 'assistant' || r.role === 'error') {
+            gotAssistantOrError = true;
+          }
+        });
+        if (gotAssistantOrError) removePending();
+      } catch (_) {}
+    }, 1000);
+  }
+
+  async function submit(textIn) {
+    const text = (textIn ?? input.value).trim();
+    if (!text) return;
+    input.value = '';
+    if (suggestions) suggestions.style.display = 'none';
+    try {
+      const newId = await invokeCmd('chat_send', { text });
+      // Optimistic render: show the user row immediately; polling will de-dup
+      // via lastId. We advance lastId past the new row id because polling
+      // returns `id > lastId`.
+      appendRow({ role: 'user', content: text, id: newId, status: 'pending' });
+      lastId = Math.max(lastId, newId);
+      appendPending();
+      startPolling();
+    } catch (e) {
+      appendRow({ role: 'error', content: `Could not send: ${e}` });
+    }
+  }
+
+  async function startNew() {
+    if (newBtn?.disabled) return;
+    // Stop polling, wipe DB, reset local state, restore the empty-state UI.
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (newBtn) newBtn.disabled = true;
+    try {
+      await invokeCmd('chat_reset');
+    } catch (e) {
+      if (newBtn) newBtn.disabled = false;
+      appendRow({ role: 'error', content: `Could not start a new chat: ${e}` });
+      return;
+    }
+    lastId = 0;
+    seenPending = false;
+    body.innerHTML = initialGreeting;
+    if (suggestions) suggestions.style.display = '';
+    if (input) input.value = '';
+    if (newBtn) newBtn.disabled = false;
+    startPolling();
+  }
+
+  if (send)   send.addEventListener('click', () => submit());
+  if (input)  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  if (newBtn) newBtn.addEventListener('click', startNew);
+  if (suggestions) suggestions.querySelectorAll('.chat-suggestion')
+    .forEach(btn => btn.addEventListener('click', () => submit(btn.textContent.trim())));
+
+  await loadInitial();
+  // Always poll — cheap (1s SELECT) and covers the "prior turn still running"
+  // case where the app was closed mid-answer.
+  startPolling();
 }
 
 // ─── Settings wiring ─────────────────────────────────────────────────

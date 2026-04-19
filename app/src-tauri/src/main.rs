@@ -580,6 +580,107 @@ fn delete_all_data() -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct ChatMessage {
+    id: i64,
+    created_at: i64,
+    role: String,
+    content: String,
+    status: String,
+}
+
+/// Append a new `user` turn to chat_messages with status='pending'. The
+/// daemon's chat-poll timer picks it up within ~CHAT_POLL_SECS, runs a
+/// tool-use loop, and writes an `assistant` reply. Returns the new row id so
+/// the UI can track poll progress against it.
+#[tauri::command]
+fn chat_send(text: String) -> Result<i64, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found — is the daemon installed?".into());
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("empty message".into());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chat_messages (\
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, \
+            role TEXT NOT NULL, content TEXT NOT NULL, tool_calls_json TEXT, \
+            status TEXT NOT NULL DEFAULT 'done', model TEXT, \
+            tokens_in INTEGER, tokens_out INTEGER, error TEXT)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT INTO chat_messages(created_at, role, content, status) \
+         VALUES(?1, 'user', ?2, 'pending')",
+        rusqlite::params![now, trimmed],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Return chat_messages rows with id > since_id in ascending id order. Only
+/// user-facing fields are returned — the UI doesn't need the tool_calls_json
+/// or token counts.
+#[tauri::command]
+fn chat_history(since_id: Option<i64>) -> Result<Vec<ChatMessage>, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    let conn = open_read_only()?;
+    let has_table: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chat_messages'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if has_table == 0 {
+        return Ok(vec![]);
+    }
+    let since = since_id.unwrap_or(0);
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, created_at, role, content, status \
+             FROM chat_messages \
+             WHERE id > ?1 AND role IN ('user','assistant','error') \
+             ORDER BY id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([since], |row| {
+            Ok(ChatMessage {
+                id: row.get(0)?,
+                created_at: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                status: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Wipe the chat conversation. Does not touch activity_log or day_summary.
+#[tauri::command]
+fn chat_reset() -> Result<(), String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    let _ = conn.execute("DELETE FROM chat_messages", []);
+    Ok(())
+}
+
 /// Tell the daemon to regenerate today's summary now, bypassing its 30-min
 /// regen gate. We communicate through the shared SQLite — the daemon polls
 /// `app_config` on a short timer (see daemon/analyze.py::check_manual_request).
@@ -758,7 +859,10 @@ fn main() {
             analyze_now,
             db_size_bytes,
             export_today_json,
-            delete_all_data
+            delete_all_data,
+            chat_send,
+            chat_history,
+            chat_reset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -37,19 +37,25 @@
       <!-- CHAT -->
       <section class="screen" id="screen-chat" data-screen-label="chat">
         <div class="chat-full">
-          <div class="hero reveal" style="padding-bottom: 24px;">
+          <div class="hero reveal" style="padding-bottom: 24px; position: relative;">
             <div class="hero-eyebrow">Chat · ask your day anything</div>
             <h1 class="hero-phrase" style="font-size: clamp(28px, 3.6vw, 44px);">A quiet place to ask your laptop what it saw today.</h1>
+            <button type="button" class="chat-new" id="btn-chat-new" title="Start a new chat (clears history)" aria-label="Start a new chat">
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+              <span>New chat</span>
+            </button>
           </div>
           <div class="chat-body" id="chat-body">
             <div class="chat-msg bot">Hi. I can tell you about your day — what you worked on, where the monkey took over, when you actually rested. What do you want to know?</div>
           </div>
           <div class="chat-suggestions" id="chat-suggestions">
-            <button type="button" class="chat-suggestion">Summarize my day</button>
-            <button type="button" class="chat-suggestion">What did the monkey do today?</button>
-            <button type="button" class="chat-suggestion">Was my morning productive?</button>
-            <button type="button" class="chat-suggestion">When did I take breaks?</button>
-            <button type="button" class="chat-suggestion">What was I reading?</button>
+            <button type="button" class="chat-suggestion">What did I do in the last 30 minutes?</button>
+            <button type="button" class="chat-suggestion">Was I on any calls today? Who with?</button>
+            <button type="button" class="chat-suggestion">What did I work on most this morning?</button>
+            <button type="button" class="chat-suggestion">When did I take a break?</button>
+            <button type="button" class="chat-suggestion">What was I reading around 3pm?</button>
           </div>
           <div class="chat-input">
             <input id="chat-input" placeholder="Ask about your day…" />
