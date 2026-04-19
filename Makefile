@@ -37,7 +37,7 @@ KEYCHAIN_SVC := com.brainloop.ai
         clean clean-cache clean-all venv \
         ui ui-build analyze-now show-summary \
         config-gemini config-anthropic config-openai \
-        bundle-daemon bundle clean-bundle
+        bundle-daemon bundle clean-bundle inject-install
 
 help:
 	@echo "Brainloop — available targets:"
@@ -215,6 +215,8 @@ BUILD_VENV_PY  := $(BUILD_VENV)/bin/python3
 BUILD_PYINST   := $(BUILD_VENV)/bin/pyinstaller
 DAEMON_BIN     := $(BUILD_DIR)/dist/brainloopd
 TAURI_RES_DIR  := $(PROJ_DIR)/app/src-tauri/resources
+DMG_OUT_DIR    := $(PROJ_DIR)/app/src-tauri/target/release/bundle/dmg
+INSTALL_CMD    := $(BUILD_DIR)/dmg/Install.command
 
 $(BUILD_VENV_PY):
 	@mkdir -p "$(BUILD_DIR)"
@@ -238,13 +240,38 @@ bundle-daemon: $(BUILD_VENV_PY)
 	@echo "→ Copied brainloopd + plist template into $(TAURI_RES_DIR)"
 
 # End-to-end bundle: daemon binary → Tauri release build → Brainloop.app + DMG.
+# The DMG gets post-processed to inject Install.command (see inject-install).
 bundle: bundle-daemon
 	@echo "→ Building Tauri release bundle…"
 	@cd "$(PROJ_DIR)/app" && cargo tauri build
+	@$(MAKE) inject-install
 	@echo ""
 	@echo "✓ Bundle ready:"
 	@ls "$(PROJ_DIR)/app/src-tauri/target/release/bundle/macos/"*.app 2>/dev/null || true
-	@ls "$(PROJ_DIR)/app/src-tauri/target/release/bundle/dmg/"*.dmg 2>/dev/null || true
+	@ls "$(DMG_OUT_DIR)/"*.dmg 2>/dev/null || true
+
+# Mount the Tauri-built DMG read-write, drop in build/dmg/Install.command, then
+# recompress. The recipient double-clicks Install.command once after dragging
+# Brainloop.app into /Applications — it runs `xattr -dr com.apple.quarantine`
+# which clears the Gatekeeper "damaged" block for ad-hoc-signed apps. No
+# Developer ID needed for this distribution path.
+inject-install:
+	@echo "→ Injecting Install.command into DMG…"
+	@DMG_IN=$$(ls "$(DMG_OUT_DIR)"/*.dmg 2>/dev/null | head -1); \
+	if [ -z "$$DMG_IN" ]; then echo "  ✗ no DMG found in $(DMG_OUT_DIR)"; exit 1; fi; \
+	if [ ! -x "$(INSTALL_CMD)" ]; then echo "  ✗ $(INSTALL_CMD) missing or not executable"; exit 1; fi; \
+	for vol in "/Volumes/Brainloop"*; do [ -d "$$vol" ] && hdiutil detach "$$vol" -force -quiet 2>/dev/null || true; done; \
+	DMG_RW=$$(mktemp -t brainloop-rw); rm -f "$$DMG_RW"; \
+	hdiutil convert "$$DMG_IN" -format UDRW -o "$$DMG_RW" -quiet; \
+	MOUNT=$$(hdiutil attach -readwrite -noverify -noautoopen "$$DMG_RW.dmg" | grep -Eo '/Volumes/[^[:cntrl:]]+' | tail -1); \
+	if [ -z "$$MOUNT" ] || [ ! -d "$$MOUNT" ]; then echo "  ✗ could not mount $$DMG_RW.dmg (got '$$MOUNT')"; exit 1; fi; \
+	cp "$(INSTALL_CMD)" "$$MOUNT/Install.command"; \
+	chmod +x "$$MOUNT/Install.command"; \
+	hdiutil detach "$$MOUNT" -quiet; \
+	rm -f "$$DMG_IN"; \
+	hdiutil convert "$$DMG_RW.dmg" -format UDZO -o "$$DMG_IN" -quiet; \
+	rm -f "$$DMG_RW.dmg"; \
+	echo "  ✓ Install.command injected → $$DMG_IN"
 
 clean-bundle:
 	@rm -rf "$(BUILD_DIR)/build" "$(BUILD_DIR)/dist" "$(TAURI_RES_DIR)"
