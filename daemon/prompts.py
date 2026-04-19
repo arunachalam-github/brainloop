@@ -153,7 +153,10 @@ PAYLOAD_SCHEMA = {
             },
             "acts": {
                 "type": "array",
-                "minItems": 2,
+                # 1 act is fine when the user just woke up / day just started.
+                # A stricter minimum causes the model to duplicate its only
+                # act to satisfy the schema, which users see as "2 Now acts".
+                "minItems": 1,
                 "maxItems": 5,
                 "items": {
                     "type": "object",

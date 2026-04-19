@@ -235,26 +235,46 @@ def _extract_platform(url: str | None) -> str:
 
 
 def _sanitize_payload(payload: dict) -> None:
-    """Relabel browser-app source values to "Web" as a last-resort fallback.
+    """Post-process the LLM payload to shake off a few repeatable model tics.
 
-    Platform identification is now handled upstream in build_context (which
-    extracts a `platform` from each dwell's browser_url and hands it to the
-    LLM). The LLM should emit that platform directly in `source`. If it
-    still falls back to the browser app name (because the dwell had no URL
-    — e.g. Comet — and page_text didn't make the platform obvious), we
-    degrade to "Web" rather than keep lying about which app was used.
+    1. Relabel browser-app source values ("Chrome", "Comet") in things_read
+       to "Web" when platform inference fails upstream.
+    2. Deduplicate `acts`: when the day just started, a model will
+       sometimes emit two identical "Now" acts (same title + narrative) to
+       satisfy prior minimum-count schemas. Drop any act that repeats the
+       (title, time_range, narrative) signature of an earlier one.
     """
     try:
-        items = payload.get("widgets", {}).get("things_read") or []
+        widgets = payload.get("widgets", {})
+        items = widgets.get("things_read") or []
     except AttributeError:
-        return
+        items = []
     for it in items:
         if not isinstance(it, dict):
             continue
         src = (it.get("source") or "").strip()
         if src.lower() in _BROWSER_SOURCES:
             it["source"] = "Web"
-    payload["widgets"]["things_read"] = items
+    if "widgets" in payload:
+        payload["widgets"]["things_read"] = items
+
+    acts = payload.get("acts")
+    if isinstance(acts, list):
+        seen: set[tuple[str, str, str]] = set()
+        unique: list[dict] = []
+        for a in acts:
+            if not isinstance(a, dict):
+                continue
+            sig = (
+                (a.get("title") or "").strip().lower(),
+                (a.get("time_range") or "").strip(),
+                (a.get("narrative") or "").strip()[:120].lower(),
+            )
+            if sig in seen:
+                continue
+            seen.add(sig)
+            unique.append(a)
+        payload["acts"] = unique
 
 
 # ── Context builder (pure aggregation, no LLM) ────────────────────────────────
