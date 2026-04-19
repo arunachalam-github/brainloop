@@ -190,13 +190,32 @@ window.BRAINLOOP_DATA = {
 };
 ```
 
-**windowStartMs** — must equal the epoch used in the bucket SQL query so bar positions align with the x-axis labels. Use local midnight (IST):
+**windowStartMs** — must equal the epoch used in the bucket SQL query so bar positions align with the x-axis labels. Use local midnight derived from the auto-detected timezone:
 ```python
+import sqlite3
 from datetime import datetime, timezone, timedelta
-IST = timezone(timedelta(hours=5, minutes=30))  # adjust for other timezone
-midnight = datetime(YYYY, MM, DD, 0, 0, 0, tzinfo=IST)
-windowStartMs = int(midnight.timestamp() * 1000)
-# e.g. Apr 19 2026 IST midnight → 1776537000000
+
+# Auto-detect local timezone from the DB using TWO independent methods — both must agree
+conn = sqlite3.connect(os.path.expanduser('~/Library/Application Support/brainloop/activity.db'))
+
+# Method 1: ts_iso (local time stored by daemon) vs ts (UTC unix)
+row = conn.execute("SELECT ts, ts_iso FROM activity_log ORDER BY ts DESC LIMIT 1").fetchone()
+ts_unix, ts_iso = row
+utc_dt = datetime.fromtimestamp(int(ts_unix), tz=timezone.utc).replace(tzinfo=None)
+tz_method1 = int((datetime.fromisoformat(ts_iso) - utc_dt).total_seconds())
+
+# Method 2: SQLite's own localtime conversion vs utc
+row2 = conn.execute("SELECT datetime(ts,'unixepoch') as utc, datetime(ts,'unixepoch','localtime') as local FROM activity_log ORDER BY ts DESC LIMIT 1").fetchone()
+tz_method2 = int((datetime.fromisoformat(row2[1]) - datetime.fromisoformat(row2[0])).total_seconds())
+
+assert tz_method1 == tz_method2, f"Timezone mismatch: method1={tz_method1} method2={tz_method2} — do not proceed"
+TZ_OFFSET = tz_method1
+# e.g. IST → 19800, EST → -18000, PST → -28800
+
+LOCAL_TZ = timezone(timedelta(seconds=TZ_OFFSET))
+midnight = datetime(YYYY, MM, DD, 0, 0, 0, tzinfo=LOCAL_TZ)
+midnight_epoch = int(midnight.timestamp())
+windowStartMs = midnight_epoch * 1000
 ```
 
 **CRITICAL — bucket epoch must match windowStartMs:** The bucket `idx` SQL must use the same midnight epoch. Use the unix timestamp of local midnight, not `strftime('%s','YYYY-MM-DD 00:00:00')` (which is UTC midnight). See query 2 below.
@@ -205,7 +224,7 @@ windowStartMs = int(midnight.timestamp() * 1000)
 
 Run ALL of the following queries. Every query contributes to the final report — skipping any will produce an incomplete picture.
 
-Note: `ts + 19800` converts UTC to IST (UTC+5:30). Replace `19800` with your local UTC offset in seconds if different. Replace `YYYY-MM-DD` with the report date.
+Note: `ts + TZ_OFFSET` converts UTC unix to local time. `TZ_OFFSET` is auto-detected from the DB (see windowStartMs section above) — do not hardcode `19800` or any fixed value. Replace `YYYY-MM-DD` with the report date.
 
 ---
 
@@ -213,30 +232,26 @@ Note: `ts + 19800` converts UTC to IST (UTC+5:30). Replace `19800` with your loc
 
 ```sql
 -- What was on screen when the day started
-SELECT datetime(ts+19800,'unixepoch') as ist, app_name, window_title
+SELECT datetime(ts+TZ_OFFSET,'unixepoch') as local_time, app_name, window_title
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH
 ORDER BY ts LIMIT 5;
 
 -- Latest activity (data cutoff)
-SELECT datetime(ts+19800,'unixepoch') as ist, app_name, window_title
+SELECT datetime(ts+TZ_OFFSET,'unixepoch') as local_time, app_name, window_title
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH
 ORDER BY ts DESC LIMIT 3;
 ```
 
 #### 2. Total switches + 30-min buckets (seismo chart)
 
-**IMPORTANT:** Use the unix timestamp of local midnight as the bucket epoch — NOT `strftime('%s','YYYY-MM-DD 00:00:00')` (that is UTC midnight, which for IST is 5h30m off). This epoch must match `windowStartMs` exactly, or the chart bars will appear at the wrong time of day.
-
-For IST (UTC+5:30), local midnight = `YYYY-MM-DD 00:00:00 IST` = `YYYY-MM-DD` previous day `18:30:00 UTC`.
+**IMPORTANT:** Use the unix timestamp of local midnight as the bucket epoch — NOT `strftime('%s','YYYY-MM-DD 00:00:00')` (that is UTC midnight, which is off by your local offset). This epoch must match `windowStartMs` exactly, or the chart bars will appear at the wrong time of day.
 
 ```python
-# Compute local midnight epoch once, use in all bucket queries
-from datetime import datetime, timezone, timedelta
-IST = timezone(timedelta(hours=5, minutes=30))
-midnight_epoch = int(datetime(YYYY, MM, DD, 0, 0, 0, tzinfo=IST).timestamp())
-# e.g. Apr 19 2026 → 1776537000
+# Compute local midnight epoch once (TZ_OFFSET auto-detected from DB — see windowStartMs section)
+LOCAL_TZ = timezone(timedelta(seconds=TZ_OFFSET))
+midnight_epoch = int(datetime(YYYY, MM, DD, 0, 0, 0, tzinfo=LOCAL_TZ).timestamp())
 ```
 
 ```sql
@@ -268,7 +283,7 @@ buckets = [{"idx": i, "count": raw.get(i, {}).get("count", 0), "apps": raw.get(i
 ```sql
 SELECT app_name, COUNT(*) as heartbeats, COUNT(*)*60 as seconds
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00') AND trigger='heartbeat'
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400 AND trigger='heartbeat'
 GROUP BY app_name ORDER BY heartbeats DESC;
 ```
 
@@ -278,11 +293,11 @@ This is the primary source for reading, social media, email, docs, shopping, and
 
 ```sql
 SELECT
-  datetime(MIN(ts)+19800,'unixepoch') as first_seen,
+  datetime(MIN(ts)+TZ_OFFSET,'unixepoch') as first_seen,
   window_title,
   browser_url
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND app_name = 'Google Chrome'
 AND trigger = 'title_changed'
 AND window_title NOT IN ('','New Tab','New tab','Untitled','Extensions',
@@ -313,10 +328,10 @@ After fetching, classify each row by domain/title pattern:
 
 ```sql
 SELECT
-  datetime(MIN(ts)+19800,'unixepoch') as first_seen,
+  datetime(MIN(ts)+TZ_OFFSET,'unixepoch') as first_seen,
   window_title
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND audio_playing = 1
 AND trigger = 'title_changed'
 AND window_title NOT IN ('','Untitled')
@@ -329,9 +344,9 @@ Use this to populate `monkey.trail` entries — these are the actual pieces of c
 #### 6. Calls (mic active)
 
 ```sql
-SELECT datetime(ts+19800,'unixepoch') as ist, app_name, window_title
+SELECT datetime(ts+TZ_OFFSET,'unixepoch') as local_time, app_name, window_title
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00') AND mic_active=1
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400 AND mic_active=1
 ORDER BY ts;
 ```
 
@@ -342,12 +357,12 @@ Do not ignore non-browser apps. Code editor, Slack, Notion, Figma, Terminal, Xco
 ```sql
 -- Distinct windows per non-browser app
 SELECT
-  datetime(MIN(ts)+19800,'unixepoch') as first_seen,
+  datetime(MIN(ts)+TZ_OFFSET,'unixepoch') as first_seen,
   app_name,
   window_title,
   COUNT(*) as events
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND app_name NOT IN ('Google Chrome','Safari','Firefox','Arc','loginwindow','Finder',
   'CoreServicesUIAgent','SecurityAgent','SystemUIServer')
 AND trigger IN ('app_switch','title_changed','heartbeat')
@@ -358,9 +373,9 @@ ORDER BY MIN(ts);
 #### 8. Focused element / visible text (what was being typed or read in non-browser apps)
 
 ```sql
-SELECT datetime(ts+19800,'unixepoch') as ist, app_name, ax_element_text, visible_text
+SELECT datetime(ts+TZ_OFFSET,'unixepoch') as local_time, app_name, ax_element_text, visible_text
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND (ax_element_text IS NOT NULL OR visible_text IS NOT NULL)
 AND app_name NOT IN ('Google Chrome','loginwindow')
 ORDER BY ts LIMIT 50;
@@ -373,12 +388,12 @@ Window titles and page_text reveal what the user was doing on AI platforms in th
 ```sql
 -- AI platform tab visits (titles + page content)
 SELECT
-  datetime(MIN(ts)+19800,'unixepoch') as first_seen,
+  datetime(MIN(ts)+TZ_OFFSET,'unixepoch') as first_seen,
   window_title,
   browser_url,
   MAX(page_text) as page_content
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND (
   window_title LIKE '%Claude%'
   OR window_title LIKE '%ChatGPT%'
@@ -415,9 +430,9 @@ AI platform classification:
 For **Claude desktop app** specifically, use `visible_text` to understand what was being discussed:
 
 ```sql
-SELECT datetime(ts+19800,'unixepoch') as ist, visible_text
+SELECT datetime(ts+TZ_OFFSET,'unixepoch') as local_time, visible_text
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND app_name = 'Claude'
 AND visible_text IS NOT NULL
 ORDER BY ts LIMIT 20;
@@ -430,12 +445,12 @@ VS Code (`Code`), Cursor, Xcode, IntelliJ, WebStorm, PyCharm, etc. Window titles
 ```sql
 -- All IDE window titles — file + project context
 SELECT
-  datetime(MIN(ts)+19800,'unixepoch') as first_seen,
+  datetime(MIN(ts)+TZ_OFFSET,'unixepoch') as first_seen,
   app_name,
   window_title,
   COUNT(*) as heartbeats
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND app_name IN ('Code','Cursor','Xcode','IntelliJ IDEA','WebStorm','PyCharm',
   'Android Studio','RubyMine','CLion','GoLand','Rider','Nova','Sublime Text',
   'TextMate','BBEdit','Zed')
@@ -453,10 +468,10 @@ Use `window_title` to extract:
 Also pull visible text and AX element text to understand what was typed:
 
 ```sql
-SELECT datetime(ts+19800,'unixepoch') as ist, app_name, window_title,
+SELECT datetime(ts+TZ_OFFSET,'unixepoch') as local_time, app_name, window_title,
        ax_element_text, visible_text
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND app_name IN ('Code','Cursor','Xcode','IntelliJ IDEA','WebStorm','PyCharm')
 AND (ax_element_text IS NOT NULL OR visible_text IS NOT NULL)
 ORDER BY ts LIMIT 30;
@@ -466,11 +481,11 @@ ORDER BY ts LIMIT 30;
 
 ```sql
 SELECT
-  datetime(MIN(ts)+19800,'unixepoch') as first_seen,
+  datetime(MIN(ts)+TZ_OFFSET,'unixepoch') as first_seen,
   window_title,
   COUNT(*) as heartbeats
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND app_name IN ('Terminal','iTerm2','Warp','Hyper','Alacritty')
 AND trigger = 'heartbeat'
 GROUP BY window_title
@@ -485,12 +500,12 @@ Terminal window titles show the shell session name, working directory, and activ
 
 ```sql
 SELECT
-  datetime(MIN(ts)+19800,'unixepoch') as first_seen,
+  datetime(MIN(ts)+TZ_OFFSET,'unixepoch') as first_seen,
   window_title,
   browser_url,
   SUBSTR(MAX(page_text), 1, 500) as content_snippet
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND page_text IS NOT NULL AND page_text != 'empty'
 AND app_name = 'Google Chrome'
 GROUP BY window_title
@@ -511,9 +526,9 @@ Use `content_snippet` to:
 SELECT
   SUBSTR(browser_url, 1, INSTR(browser_url||'/', '/', 9) - 1) as domain,
   COUNT(DISTINCT window_title) as pages_visited,
-  MIN(datetime(ts+19800,'unixepoch')) as first_seen
+  MIN(datetime(ts+TZ_OFFSET,'unixepoch')) as first_seen
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND browser_url IS NOT NULL AND browser_url != ''
 AND app_name = 'Google Chrome'
 GROUP BY domain
@@ -535,7 +550,7 @@ SELECT
   GROUP_CONCAT(DISTINCT window_title) as windows,
   GROUP_CONCAT(DISTINCT SUBSTR(ax_element_text, 1, 80)) as sample_text
 FROM activity_log
-WHERE ts > strftime('%s','YYYY-MM-DD 00:00:00')
+WHERE ts > MIDNIGHT_EPOCH AND ts < MIDNIGHT_EPOCH + 86400
 AND trigger = 'value_changed'
 GROUP BY app_name
 ORDER BY typing_events DESC;
@@ -640,7 +655,15 @@ Default viz mode: `seismo` (set by `TWEAK_DEFAULTS` in the template).
 
 **No italics anywhere in period text.** The monkey sentence (`.monkey-sentence`) is `font-style: normal`.
 
-### Monkey sentence logic (auto-generated from trail)
+### Monkey sentence rendering
+
+The monkey block renders two lines:
+
+1. **`.monkey-sentence`** — shows `monkey.story` if present; falls back to `monkeySentence()` if not. Always populate `monkey.story` — the auto-generated fallback lists all trail items and becomes unreadable at > 4 items.
+
+2. **`.monkey-trail-summary`** — first 3 trail `what` titles joined by `, ` + `+ N more` count. Rendered in monospace terracotta at 11px.
+
+### Monkey sentence logic (auto-generated fallback only)
 
 The `monkeySentence()` function in the JSX groups `trail` entries by `where` platform and produces one sentence per period:
 
