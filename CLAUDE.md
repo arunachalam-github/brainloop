@@ -155,7 +155,7 @@ window.BRAINLOOP_DATA = {
     labels:  [{ label, idx_f }],      // x-axis labels: "12AM", "2AM", "4AM" …
     total:   224,                     // total app_switch rows for the day
   },
-  periods: [   // exactly 3 — the "three acts" of the day
+  periods: [   // 3–5 acts depending on day length and content (see synthesis rules)
     {
       id:          "morning",
       label:       "Early morning",       // display label
@@ -542,7 +542,7 @@ ORDER BY typing_events DESC;
 
 ### How to synthesise all queries into the report
 
-1. **Periods** — divide the day into 3 acts based on activity clusters. Use app_switch timeline + heartbeat counts to find natural breaks (long `loginwindow` gaps = away from desk).
+1. **Periods** — divide the day into acts based on activity clusters. Use app_switch timeline + heartbeat counts to find natural breaks (long `loginwindow` gaps = away from desk). Default is 3 acts. Use 4–5 acts if the day spans more than 6 active hours and there is enough distinct content to justify more granularity. Never exceed 5 acts.
 2. **productive.headline** — what the user spent the most focused time doing. Check queries 3, 7, 10 — Code/Cursor/Xcode heartbeats, Docs/Sheets, AI sessions. Confirm with query 14 (typing events) — typing in Code = coding, typing in Claude = prompting.
 3. **openedWith** — the very first thing in that period from the app_switch timeline (query 1).
 4. **monkey.trail** — query 5 (audio playing) + query 4 social/video + ecommerce categories. These are distraction moments.
