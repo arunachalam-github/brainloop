@@ -6,10 +6,10 @@ Four minutes later, you're reading about a geopolitical conflict in a country yo
 You know how it happened. A notification. A headline. A "quick check." <br/>
 One click led to another, and now the morning is gone.
 
-Your brain? Somewhere else entirely.
+Your brain? Somewhere else entirely.<br/>
 Here's the thing: your brain isn't broken. It did exactly what brains do.
 
-## The Two Characters Inside Your Brain
+### The Two Characters Inside Your Brain
 
 Psychologists call it the **Monkey Mind**: restless, wandering part of your brain that jumps from one thought to another, never settling. Tim Urban called it the [Instant Gratification Monkey](https://www.youtube.com/watch?v=arj7oStGLkU). 
 
@@ -20,45 +20,34 @@ Both live in you. They take turns running your day. <br/>
 
 ---
 # What Brainloop Is
-Brainloop is a macOS app that watches how your attention moves — across apps, windows, and hours — and at the end of the day, narrates it back to you. <br/>
+Brainloop is a macOS app that watches how your attention moves, across apps, windows, and hours, and at the end of the day, narrates it back to you. 
 Not as data. Not as a productivity score. As a story.
 
-> A building day. 
-> Started by reading about AI making us dumber, then drifted into Karpathy’s “second brain” on Substack. 
-> Spent the morning building Brainloop with Claude. 
-> The gratification monkey began with reels on politics and movie BGMs, and by evening, it had evolved into shopping for fridge magnets and armchairs.
+> A building day. Started by reading about AI making us dumber, then drifted into Karpathy’s second brain on Substack. Spent the morning building Brainloop with Claude. The gratification monkey began with reels on politics and movie BGMs, and by evening, it had evolved into shopping for fridge magnets and armchairs.
 
-That's your day. Honest. Unfiltered. In plain English.
-You've heard of building a **Second Brain**.
+That's your day. Honest. Unfiltered. In plain English.<br/>
+You've heard of building a **Second Brain**.<br/> 
 **Brainloop shows you what the first one was actually doing**.
+<br/>
 
+|Feature|Description|
+|--------|------------|
+|**Day in Three Acts**|Your day broken into natural chapters, not hours. Morning momentum. Afternoon drift. Evening escape|
+|**Context Switches**|Number of times your attention shifted, visualized as a seismograph-style chart|
+|**The Gratification Monkey**|Brainloop spots when the monkey took over: what triggered it, how long it lasted, where it took you.|
+|**Longest Focus**|Your best block of uninterrupted work. The one thing you can build on tomorrow.|
+|**Doom-Scroll**|Accumulated time on passive, drift-mode content. No judgment. Just the mirror.|
+**Things You Read**|Every article, post, or page you actually spent time with. Timestamped.|
+**The Narrative Summary**|One paragraph. Your whole day. Written by the machine that watched it.|
 
-## How your mind actually worked while doing it?
-
-Brainloop is a macOS background daemon that silently records your computer activity into a private local SQLite database. All data stays on your Mac. Nothing is sent anywhere.
-
-It doesn’t just track what you did—
-it helps you understand how your mind moved through the day.
-
----
-
-## What it captures
-
-- Active app and window title (every switch)
-- Browser URL and page content (what you're reading)
-- Audio and microphone state (are you on a call?)
-- Slack channels, Zoom meetings, Google Docs you're in
-- App switches, focus changes, and a heartbeat every 60 seconds
-
----
+Attached Image at the bottom. 
 
 ## Requirements
 
 - macOS 12 or later
 - Python 3.10 or later — [download from python.org](https://www.python.org/downloads/) if needed
-- [Claude Code](https://claude.ai/code) — for querying your activity in natural language
+- [Claude Code](https://claude.ai/code) — for querying your activity in natural language and generating the report.
 
----
 
 ## Install
 
@@ -67,44 +56,31 @@ it helps you understand how your mind moved through the day.
 git clone https://github.com/yourusername/brainloop
 cd brainloop
 ```
-
 **2. Run the installer (one command)**
 ```bash
 bash install.sh install
 ```
-
-This automatically:
-- Finds your Python installation
-- Installs required dependencies
-- Configures and starts the background daemon
-
 **3. Grant permissions** (see below — required for full capture)
-
----
 
 ## Permissions
 
 Brainloop needs two permissions to capture your activity. Grant them once after installing.
 
-### Accessibility (required)
-
+```
+Accessibility (required)
 Without this, brainloop cannot read window titles, URLs, or text content.
 
-> **System Settings → Privacy & Security → Accessibility**
-> Click the `+` button and add `python3`
+- In MAC: Go to → System Settings → Privacy & Security → Accessibility
+- Click the `+` button and add `python3`
+```
 
-### Allow JavaScript from Apple Events in Chrome (required for page content)
+```
+Allow JavaScript from Apple Events in Chrome (required for page content)
+Without this, brainloop can see *which* URL you're on but not what's on the page.
+This is what enables answers like "what was I reading at 3pm?" or "what was I watching on YouTube?
 
-Without this, brainloop can see *which* URL you're on but not *what's on the page*.
-
-> **In Chrome: View menu → Developer → Allow JavaScript from Apple Events**
-
-This is what enables answers like "what was I reading at 3pm?" or "what was I watching on YouTube?"
-
-### Screen Recording (if prompted)
-
-macOS may ask for Screen Recording permission the first time brainloop reads content from certain apps. Approve when prompted.
-
+- In Chrome: Go to → View menu → Developer → Allow JavaScript from Apple Events
+```
 ---
 
 ## Ask questions with Claude Code
@@ -118,12 +94,11 @@ claude
 Then just type naturally:
 
 ```
+"Prepare the day report"
 "Give me a summary of my day"
 "What did I do in the last 30 minutes?"
-"Was I on any calls today? Who with?"
-"What was I reading around 3pm?"
+"What was I reading today"
 "What was I surfing on YouTube today?"
-"Am I on a call right now?"
 "What did I work on most this morning?"
 "What websites did I visit today?"
 "When did I take a break?"
@@ -131,8 +106,6 @@ Then just type naturally:
 ```
 
 Claude reads `CLAUDE.md` on startup and knows exactly where your data is and how to query it.
-
----
 
 ## Managing the daemon
 
@@ -148,14 +121,26 @@ The daemon starts automatically on login and restarts if it crashes.
 
 ---
 
+## How it Works?
+
+Brainloop is a macOS background daemon that silently records your computer activity into a local SQLite database. All data stays on your Mac. Nothing is sent anywhere.
+What it captures
+
+- Active app and window title (every switch)
+- Browser URL and page content (what you're reading) 
+- Audio and microphone state (are you on a call?)
+- Slack channels, Zoom meetings, Google Docs you're in
+- App switches, focus changes, and a heartbeat every 60 seconds
+
 ## Privacy
 
 - All data is stored locally at `~/Library/Application Support/brainloop/activity.db`
 - Nothing is uploaded, synced, or sent anywhere
 - To delete all captured data: `rm ~/Library/Application\ Support/brainloop/activity.db`
 - To stop permanently: `bash install.sh uninstall`
-
----
+- Passwords are never read or captured.
+- Keystores are not captured
+- No Screen Recording 
 
 ## Troubleshooting
 
