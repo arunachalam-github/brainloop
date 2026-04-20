@@ -1,14 +1,15 @@
 # Brainloop
 
-It's Monday. 9:00 AM. You had a plan.
+It's Monday. 9:00 AM. You had a plan.<br/>
 Four minutes later, you're reading about a geopolitical conflict in a country you'll never visit. 
 
-You know how it happened. A notification. A headline. A "quick check." One click became seven tabs, and now the morning is gone.
+You know how it happened. A notification. A headline. A "quick check." <br/>
+One click became seven tabs, and now the morning is gone.
 
 Your brain?
 Somewhere else entirely.
 
-# The Two Characters Inside Your Brain
+## The Two Characters Inside Your Brain
 
 Psychologists call it the **Monkey Mind**: the restless, novelty-hungry part of your brain that jumps from branch to branch, never settling.
 
