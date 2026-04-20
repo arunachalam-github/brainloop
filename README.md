@@ -83,6 +83,13 @@ This is what enables answers like "what was I reading at 3pm?"
 
 → In Chrome: Go to → View menu → Developer → Allow JavaScript from Apple Events
 ```
+
+**4. Run as Claude Skill to generate report**
+```bash
+/brainusagereport 
+```
+Make sure to restart your current Claude Code session. The skill will generate a report and open a local HTML file with details about your cognitive usage patterns.
+
 ---
 
 ## Ask questions with Claude Code
