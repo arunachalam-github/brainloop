@@ -20,8 +20,7 @@ Both live in you. They take turns running your day. <br/>
 
 ---
 # What Brainloop Is
-Brainloop is a macOS app that watches how your attention moves, across apps, windows, and hours, and at the end of the day, narrates it back to you. 
-Not as data. Not as a productivity score. As a story.
+Brainloop is a macOS app that tracks how your attention shifts across apps, windows, hours and reflects it back to you as a story. Not as data. Not as a productivity score. As a story.
 
 > A building day. Started by reading about AI making us dumber, then drifted into Karpathy’s second brain on Substack. Spent the morning building Brainloop with Claude. The gratification monkey began with reels on politics and movie BGMs, and by evening, it had evolved into shopping for fridge magnets and armchairs.
 
@@ -67,19 +66,19 @@ bash install.sh install
 Brainloop needs two permissions to capture your activity. Grant them once after installing.
 
 ```
-Accessibility (required)
+1. Accessibility (required)
 Without this, brainloop cannot read window titles, URLs, or text content.
 
-- In MAC: Go to → System Settings → Privacy & Security → Accessibility
-- Click the `+` button and add `python3`
+→ In MAC: Go to → System Settings → Privacy & Security → Accessibility
+→ Click the `+` button and add `python3`
 ```
 
 ```
-Allow JavaScript from Apple Events in Chrome (required for page content)
+2. Allow JavaScript from Apple Events in Chrome (required for page content)
 Without this, brainloop can see *which* URL you're on but not what's on the page.
-This is what enables answers like "what was I reading at 3pm?" or "what was I watching on YouTube?
+This is what enables answers like "what was I reading at 3pm?"
 
-- In Chrome: Go to → View menu → Developer → Allow JavaScript from Apple Events
+→ In Chrome: Go to → View menu → Developer → Allow JavaScript from Apple Events
 ```
 ---
 
