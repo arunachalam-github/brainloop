@@ -1,5 +1,5 @@
 # Brainloop
-Brainloop tracks how your attention moves across apps and time.
+Brainloop tracks how your attention moves across apps and time in MacOS.<br/>
 At the end of the day, it reflects your day back as a story - not data, not a productivity score.
 
 ## Why Brainloop? 
