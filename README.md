@@ -4,19 +4,34 @@ It's Monday. 9:00 AM. You had a plan.<br/>
 Four minutes later, you're reading about a geopolitical conflict in a country you'll never visit. 
 
 You know how it happened. A notification. A headline. A "quick check." <br/>
-One click became seven tabs, and now the morning is gone.
+One click led to another, and now the morning is gone.
 
-Your brain?
-Somewhere else entirely.
+Your brain? Somewhere else entirely.
+Here's the thing: your brain isn't broken. It did exactly what brains do.
 
 ## The Two Characters Inside Your Brain
 
-Psychologists call it the **Monkey Mind**: the restless, novelty-hungry part of your brain that jumps from branch to branch, never settling.
+Psychologists call it the **Monkey Mind**: restless, wandering part of your brain that jumps from one thought to another, never settling. Tim Urban called it the [Instant Gratification Monkey](https://www.youtube.com/watch?v=arj7oStGLkU). 
 
 The other character is rarer. **Flow**: total absorption, the zone, the state where hours pass like minutes and you actually make the thing you set out to make.
 
-Both live in you. They take turns running your day.
+Both live in you. They take turns running your day. <br/>
 **Until now, you had no idea which one was winning.**
+
+---
+# What Brainloop Is
+Brainloop is a macOS app that watches how your attention moves — across apps, windows, and hours — and at the end of the day, narrates it back to you. <br/>
+Not as data. Not as a productivity score. As a story.
+
+> A building day. 
+> Started by reading about AI making us dumber, then drifted into Karpathy’s “second brain” on Substack. 
+> Spent the morning building Brainloop with Claude. 
+> The gratification monkey began with reels on politics and movie BGMs, and by evening, it had evolved into shopping for fridge magnets and armchairs.
+
+That's your day. Honest. Unfiltered. In plain English.
+You've heard of building a **Second Brain**.
+**Brainloop shows you what the first one was actually doing**.
+
 
 ## How your mind actually worked while doing it?
 
