@@ -96,7 +96,7 @@ claude
 Then just type naturally:
 
 ```
-"Prepare the day report"
+"Prepare the report for today"
 "Give me a summary of my day"
 "What did I do in the last 30 minutes?"
 "What was I reading today"
