@@ -182,7 +182,7 @@ window.BRAINLOOP_DATA = {
     focusStreak:  { minutes, range, label, context },
     appHours:     [{ app, minutes, pct }],   // pct 0–1, drives the bar width
     calls:        { count, totalMinutes, items: [{ time, title, minutes }] },
-    reading:      [{ title, where, when }],
+    reading:      [{ title, where, when }],  // title = line 1 (full ink); when + where = line 2 (muted mono)
     waitingOnAI:  { minutes, context, sessions },
     breaks:       [{ time, kind, minutes }],
     doomScroll:   { minutes, moments, worstWindow, note },
@@ -573,7 +573,7 @@ ORDER BY typing_events DESC;
    - Bad: "The monkey went from Wagon R to Sathuranga Vettai and more." (missing "gratification")
    - Bad: "Wagon R restoration, LKG comedy, Avvai Shanmugi and more on YouTube." (names platform)
    - Bad: "Sathuranga Vettai ran in the background for 74 minutes from 08:16 to 09:30."
-5. **widgets.reading** — query 4 rows classified as Article, Email, GitHub, Docs, Discovery + query 9 AI platform titles. **Enrich with query 12 `content_snippet`** — use actual page text to describe what was read, not just the tab title.
+5. **widgets.reading** — query 4 rows classified as Article, Email, GitHub, Docs, Discovery + query 9 AI platform titles. **Enrich with query 12 `content_snippet`** — use actual page text to describe what was read, not just the tab title. Each entry renders as: `title` on line 1 (full ink), `when · where` on line 2 (muted monospace).
 6. **widgets.appHours** — query 3 heartbeats → minutes, top 4–5 apps.
 7. **widgets.doomScroll** — Social + Video + Ecommerce minutes from queries 4+5, count distinct moments, worst window.
 8. **AI usage** — queries 9 + 12: which AI platforms were used, how long, and **what topic** (from `page_text` snippet — tab titles like "Claude" or "ChatGPT" are generic; page_text has the actual conversation subject).
