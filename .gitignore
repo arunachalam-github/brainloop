@@ -27,6 +27,12 @@ apps/brainloop_april*.html
 apps/brainloop_[0-9]*.html
 apps/brain_fog.html
 
+# Design explorations — local scratch files
+apps/timed_oval_design.html
+apps/timed_oval_design_yesterday.html
+apps/design_explorations.html
+apps/brainloop_switches.html
+
 # IDE
 .vscode/
 .idea/
