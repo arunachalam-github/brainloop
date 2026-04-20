@@ -1,20 +1,21 @@
 # Brainloop
 
-It’s Monday. 9:00 AM. You had a plan.
-Write a report.
+It's Monday. 9:00 AM. You had a plan.
+Four minutes later, you're reading about a geopolitical conflict in a country you'll never visit. 
 
-Four minutes later, you’re reading about the geopolitical conflict of a country you’ll never visit. 
-It started with a notification. Or maybe a headline. Or maybe you just needed to "quickly check one thing" before you began. 
-
-The exact trigger doesn't matter, because the result is always the same: one click became three, three became a search, then seventeen tabs, and now you're 20 minutes deep into something that has absolutely nothing to do with your morning, your report, or your job.
+You know how it happened. A notification. A headline. A "quick check." One click became seven tabs, and now the morning is gone.
 
 Your brain?
 Somewhere else entirely.
 
-So, the human brain is wired to wonder which means the brain is naturally built to be curious, explore, and ask questions. But when it’s time to focus, that same wandering becomes your biggest distraction.
+# The Two Characters Inside Your Brain
 
-You know what you did today.
-But do you know…
+Psychologists call it the **Monkey Mind**: the restless, novelty-hungry part of your brain that jumps from branch to branch, never settling.
+
+The other character is rarer. **Flow**: total absorption, the zone, the state where hours pass like minutes and you actually make the thing you set out to make.
+
+Both live in you. They take turns running your day.
+**Until now, you had no idea which one was winning.**
 
 ## How your mind actually worked while doing it?
 
