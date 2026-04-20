@@ -42,6 +42,12 @@ cmd_install() {
     launchctl load "$PLIST_DST"
     echo "✓ Installed and loaded $LABEL"
     echo "  Logs: $LOG_DIR/"
+
+    # Install Claude Code skill
+    SKILL_DIR="$HOME/.claude/skills/brainusagereport"
+    mkdir -p "$SKILL_DIR"
+    cp "$PROJ_DIR/skills/brainusagereport.md" "$SKILL_DIR/SKILL.md"
+    echo "✓ Installed /brainusagereport skill for Claude Code"
     echo ""
     echo "Next steps:"
     echo "  1. System Settings → Privacy & Security → Accessibility → add python3"
@@ -54,6 +60,10 @@ cmd_uninstall() {
     fi
     rm -f "$PLIST_DST"
     echo "Unloaded and removed $LABEL  (DB preserved in $LOG_DIR)"
+
+    # Remove Claude Code skill
+    rm -rf "$HOME/.claude/skills/brainusagereport"
+    echo "Removed /brainusagereport skill"
 }
 
 cmd_restart() {
