@@ -182,7 +182,7 @@ window.BRAINLOOP_DATA = {
     focusStreak:  { minutes, range, label, context },
     appHours:     [{ app, minutes, pct }],   // pct 0–1, drives the bar width
     calls:        { count, totalMinutes, items: [{ time, title, minutes }] },
-    reading:      [{ title, where, when }],
+    reading:      [{ title, where, when }],  // title = line 1 (full ink); when + where = line 2 (muted mono)
     waitingOnAI:  { minutes, context, sessions },
     breaks:       [{ time, kind, minutes }],
     doomScroll:   { minutes, moments, worstWindow, note },
@@ -573,7 +573,7 @@ ORDER BY typing_events DESC;
    - Bad: "The monkey went from Wagon R to Sathuranga Vettai and more." (missing "gratification")
    - Bad: "Wagon R restoration, LKG comedy, Avvai Shanmugi and more on YouTube." (names platform)
    - Bad: "Sathuranga Vettai ran in the background for 74 minutes from 08:16 to 09:30."
-5. **widgets.reading** — query 4 rows classified as Article, Email, GitHub, Docs, Discovery + query 9 AI platform titles. **Enrich with query 12 `content_snippet`** — use actual page text to describe what was read, not just the tab title.
+5. **widgets.reading** — query 4 rows classified as Article, Email, GitHub, Docs, Discovery + query 9 AI platform titles. **Enrich with query 12 `content_snippet`** — use actual page text to describe what was read, not just the tab title. Each entry renders as: `title` on line 1 (full ink), `when · where` on line 2 (muted monospace).
 6. **widgets.appHours** — query 3 heartbeats → minutes, top 4–5 apps.
 7. **widgets.doomScroll** — Social + Video + Ecommerce minutes from queries 4+5, count distinct moments, worst window.
 8. **AI usage** — queries 9 + 12: which AI platforms were used, how long, and **what topic** (from `page_text` snippet — tab titles like "Claude" or "ChatGPT" are generic; page_text has the actual conversation subject).
@@ -582,24 +582,23 @@ ORDER BY typing_events DESC;
 
 ### dayInAPhrase rules
 
-Write **3–4 sentences**. **Never use em dashes ( — ).**
+Write **3–4 sentences, under 50 words total**. **Never use em dashes ( — ).** Every sentence must earn its place — cut anything generic.
 
 Structure:
 1. **Label the day** — one short sentence: "A building day.", "A slow morning.", "A reading session.", "A scattered one."
-2. **What was read/consumed** — actual content titles or topics, flowing sequence. Name the content, not the app. Focused attention only (heartbeats while frontmost, or deliberate multi-tab reading). Skip dwell-time background apps (Spotify pinned tab, YouTube audio continuing while doing other work).
-3. **What was built/worked on** — main productive output, one clause.
+2. **What was read/consumed** — actual content titles or topics, one flowing clause. Name the content, not the app. Focused attention only (heartbeats while frontmost). Skip dwell-time background audio.
+3. **What was built/worked on** — main productive output, one clause. Omit if nothing notable.
 4. **Gratification monkey line** — always say "gratification monkey", never just "monkey". Content names only, no platform names, narrative arc + "and more" tease.
 
-**Focused attention vs dwell time:** Focused = heartbeats in that window while frontmost. Dwell = audio/app running in background while user is elsewhere. Dwell-time content belongs in monkey trail only, not in sentences 2–3.
+**Focused attention vs dwell time:** Focused = heartbeats in that window while frontmost. Dwell = audio running in background while user is elsewhere. Dwell-time content belongs in monkey trail only, not in sentences 2–3.
 
 **Good (approved canonical example):**
 > "A building day. Read about AI making you dumber, then Karpathy's second brain on Substack. Built brainloop all morning. The gratification monkey went from Wagon R to Sathuranga Vettai and more."
 
-**Bad — too zoomed out, loses the day's identity:**
-> "A building day. Brainloop took shape, inbox got cleared. The monkey kept Sathuranga Vettai warm the whole time."
+That example is 38 words — aim for that length. If you hit 50 words, cut.
 
-**Bad — task log, names apps not content:**
-> "Opened the day with yesterday's report still on screen. Read Karpathy's second brain on Substack and got to inbox zero. Built brainloop with Claude Code all morning..."
+**Bad — too long, too descriptive:**
+> "A scattered Saturday. Stericycle call ran past midnight, then Yennai Arindhal scenes deep into early morning. Work docs and GTM strategy opened late at 10. The gratification monkey went from Pavazha Malli to Sarpatta to Ghajini and more."
 
 **Always query the DB for the actual first activity before writing.** The first non-loginwindow heartbeat row tells you what was open when the screen woke up.
 
