@@ -53,9 +53,20 @@ Attached Image at the bottom.
 
 ## Install
 
+### Homebrew (recommended)
+
+```bash
+brew install --cask ayu5h-raj/tap/brainloop
+open /Applications/Brainloop.app
+```
+
+The cask handles quarantine stripping automatically — no `xattr` dance. The app installs the background daemon on first launch. Then grant the two permissions below.
+
+### From source
+
 **1. Clone the repo**
 ```bash
-git clone https://github.com/yourusername/brainloop
+git clone https://github.com/arunachalam-github/brainloop
 cd brainloop
 ```
 **2. Run the installer (one command)**
