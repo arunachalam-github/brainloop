@@ -93,19 +93,24 @@ Structure:
 - widgets: fill every field from the context; if the day has no calls,
   on_calls.count is 0 (not missing).
 - intensity_buckets: pass through the provided buckets verbatim.
-- widgets.things_read: a short, clean list (max ~8 entries). Each entry's
-  `title` MUST be the actual content title — like a single video name,
-  article headline, or named feed — NEVER a raw page_text excerpt and
-  NEVER a description. Extract titles from the page_text slices (they
-  usually appear near the top). Good titles: "Yennai Arindhal scenes",
-  "Sarpatta Parambarai scenes", "Rahul Gandhi - Lok Sabha", "Facebook
-  feed", "Twitter home". Bad titles: "Create Home Shorts Subscriptions
-  …", "Workflow Credential Project Enterprise Overview …", or any
-  sidebar/nav text.
+- widgets.things_read: a short, clean list (max ~8 entries). Each entry
+  renders as two lines in the UI: `title` on line 1 (full ink, prominent)
+  and `time · source` on line 2 (muted monospace). Because `title` stands
+  alone on the prominent line, it MUST be a punchy, standalone content
+  title that reads well without the `source` qualifier — like a single
+  video name, article headline, or named feed. NEVER a raw page_text
+  excerpt and NEVER a description. Extract titles from the page_text
+  slices (they usually appear near the top). Good titles: "Yennai
+  Arindhal scenes", "Sarpatta Parambarai scenes", "Rahul Gandhi - Lok
+  Sabha", "Facebook feed", "Twitter home". Bad titles: "Create Home
+  Shorts Subscriptions …", "Workflow Credential Project Enterprise
+  Overview …", or any sidebar/nav text.
   `source` is ALWAYS the content platform — NEVER a browser or app
-  name ("Comet", "Chrome", "Safari"). Prefer the `platform` field on
-  the corresponding browser_dwell entry verbatim when it is non-empty
-  — that's derived from the URL and is ground truth. Only fall back to
+  name ("Comet", "Chrome", "Safari"). It renders on line 2 as metadata,
+  so keep it to the platform noun ("YouTube", "Substack", "Reddit",
+  "Gmail"), not a phrase. Prefer the `platform` field on the
+  corresponding browser_dwell entry verbatim when it is non-empty —
+  that's derived from the URL and is ground truth. Only fall back to
   inferring from page_text (YouTube has "views · # likes", Reddit has
   "r/<sub>", Twitter has "@handle", etc.) when `platform` is empty
   (typically Comet dwells, which have no browser_url). If after both
