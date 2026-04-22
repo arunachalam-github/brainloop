@@ -117,7 +117,15 @@ def tick(conn: sqlite3.Connection, now_ts: float | None = None, force: bool = Fa
         log.warning("analyzer tick failed: %s", e)
         return
 
-    _sanitize_payload(payload)
+    _sanitize_payload(payload, context)
+
+    # The LLM sparsifies intensity_buckets (drops empty slots) despite the
+    # "pass through verbatim" instruction. JS renders with bucketW =
+    # availW / buckets.length, so a shorter array stretches each bucket
+    # and misaligns the waveform from the time-based tick labels. Inject
+    # the daemon's contiguous buckets + exact switch count directly.
+    payload["intensity_buckets"] = context["intensity_buckets"]
+    payload["switches_total"] = context["switches_total"]
 
     duration = time.time() - started
 
@@ -283,7 +291,7 @@ def _infer_source_from_title(title: str) -> str:
     return "Web"
 
 
-def _sanitize_payload(payload: dict) -> None:
+def _sanitize_payload(payload: dict, context: dict | None = None) -> None:
     """Post-process the LLM payload to shake off a few repeatable model tics.
 
     1. Relabel browser-app source values ("Chrome", "Comet") in things_read
@@ -294,6 +302,10 @@ def _sanitize_payload(payload: dict) -> None:
        sometimes emit two identical "Now" acts (same title + narrative) to
        satisfy prior minimum-count schemas. Drop any act that repeats the
        (title, time_range, narrative) signature of an earlier one.
+    4. Clip act time_ranges to [wake_hhmm, now_hhmm]. LLMs fabricate
+       afternoon/now acts in the future ("Afternoon 12:00–14:00" when
+       now is 10:58). Drop any act starting at/after now and clamp any
+       end_time beyond now back to now.
     """
     try:
         widgets = payload.get("widgets", {})
@@ -330,6 +342,76 @@ def _sanitize_payload(payload: dict) -> None:
             seen.add(sig)
             unique.append(a)
         payload["acts"] = unique
+
+    if context is not None:
+        _clip_acts_to_now(payload, context)
+
+
+def _parse_hhmm(s: str) -> int | None:
+    """Return minutes-since-midnight, or None if the string isn't HH:MM."""
+    if not isinstance(s, str):
+        return None
+    s = s.strip()
+    if len(s) < 4 or ":" not in s:
+        return None
+    try:
+        h, m = s.split(":", 1)
+        hi = int(h)
+        mi = int(m[:2])
+    except (ValueError, IndexError):
+        return None
+    if not (0 <= hi < 24 and 0 <= mi < 60):
+        return None
+    return hi * 60 + mi
+
+
+def _clip_acts_to_now(payload: dict, context: dict) -> None:
+    """Drop acts in the future and clamp end_time to now_hhmm.
+
+    Time-range strings look like "08:25 – 10:00" (en dash) or "08:25 - 10:00"
+    (ascii). Split on any dash/hyphen variant. If a start_time is >= now,
+    drop the act. If an end_time > now, replace it with now_hhmm.
+    """
+    acts = payload.get("acts")
+    if not isinstance(acts, list):
+        return
+    now_hhmm = context.get("now_hhmm") or ""
+    now_min = _parse_hhmm(now_hhmm)
+    if now_min is None:
+        return
+
+    dash_chars = ("\u2013", "\u2014", "-", "\u2212")
+
+    def split_range(tr: str) -> tuple[str, str] | None:
+        if not tr:
+            return None
+        for d in dash_chars:
+            if d in tr:
+                a, b = tr.split(d, 1)
+                return a.strip(), b.strip()
+        return None
+
+    cleaned: list[dict] = []
+    for a in acts:
+        if not isinstance(a, dict):
+            continue
+        parts = split_range(a.get("time_range") or "")
+        if parts is None:
+            cleaned.append(a)
+            continue
+        start_s, end_s = parts
+        start_min = _parse_hhmm(start_s)
+        end_min = _parse_hhmm(end_s)
+        # Drop acts that start at/after now — those hours haven't happened.
+        if start_min is not None and start_min >= now_min:
+            log.info("sanitize: drop future act %r (start %s >= now %s)",
+                     a.get("title"), start_s, now_hhmm)
+            continue
+        # Clamp end past now (and inverted ranges where end < start).
+        if end_min is None or end_min > now_min or (start_min is not None and end_min < start_min):
+            a["time_range"] = f"{start_s} – {now_hhmm}"
+        cleaned.append(a)
+    payload["acts"] = cleaned
 
 
 # ── Context builder (pure aggregation, no LLM) ────────────────────────────────

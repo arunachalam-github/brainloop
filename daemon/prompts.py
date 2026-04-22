@@ -105,25 +105,86 @@ Structure:
   entertainment happened today, the word "monkey" MUST appear.
 - subtitle: lowercase "{weekday}, {month} {day} · {N} switches · {H}h{M} focus"
 - acts: covering the user's ACTIVE portion of the day — from the WOKE
-  UP time in the context through "now". Default is 3 acts. Use 4–5 only
-  if the active span exceeds ~6 hours AND there is enough distinct
-  content to justify more granularity. Never exceed 5. If the active
-  window is shorter than 2 hours, 1–2 acts is correct; do NOT pad with
-  duplicates to reach 3.
-  NEVER produce an act with a time_range that starts before the WOKE UP
-  time — those hours were sleep. Pick titles from {Past midnight, Early
-  morning, Mid-morning, Late morning, Midday, Afternoon, Late afternoon,
-  Evening, Night, Now} that match the actual clock time of the block.
-  Use "Past midnight" (NOT "Early morning") for any block whose
-  start_time is before 04:00; "Early morning" only applies to 04:00–
-  08:00. Each act spans roughly 1–3 hours. The final act is always
-  titled "Now" and ends at the current time.
+  UP time in the context through "now". The final act is always titled
+  "Now" and ends at exactly now_hhmm.
+
+  HARD TIME BOUNDS (enforce before writing anything):
+    - Let wake = WOKE UP time. Let now = now_hhmm from the context.
+    - EVERY act's time_range must satisfy wake ≤ start < end ≤ now.
+    - NEVER emit an act whose start_time is ≥ now. Those hours have
+      not happened yet. If the model feels the urge to write
+      "Afternoon 12:00–14:00" when now is 10:58, STOP.
+    - NEVER emit an act whose end_time is > now.
+    - NEVER write a time_range where end_time < start_time (e.g.
+      "14:00 – 10:58" is impossible).
+
+  ACT COUNT by active span (span = now − wake, in hours):
+    span < 2h       → 1 act  (just "Now")
+    2h ≤ span < 4h  → 2 acts
+    4h ≤ span < 6h  → 3 acts
+    6h ≤ span < 9h  → 3–4 acts
+    span ≥ 9h       → 4–5 acts (never more than 5)
+  Do NOT pad with duplicate/overlapping acts to hit a count. Fewer,
+  richer acts beat more, hollower ones.
+
+  ACT TITLE RULES — the title is determined BY THE CLOCK, not by your
+  narrative judgment. Pick the title from the START TIME of the
+  time_range using this table, no exceptions:
+    00:00–03:59  → "Past midnight"
+    04:00–07:59  → "Early morning"
+    08:00–10:59  → "Mid-morning"
+    11:00–12:29  → "Late morning"
+    12:30–13:59  → "Midday"
+    14:00–16:29  → "Afternoon"
+    16:30–18:29  → "Late afternoon"
+    18:30–20:59  → "Evening"
+    21:00–23:59  → "Night"
+  Examples — read carefully, these are common mistakes:
+    start 08:25 → title "Mid-morning"  (NOT "Past midnight", NOT "Early morning")
+    start 06:10 → title "Early morning" (NOT "Past midnight")
+    start 01:15 → title "Past midnight"
+  If two adjacent acts would share the same title, keep the title for
+  the earlier one and use the next bracket's title for the later one
+  (e.g. two "Mid-morning" acts → first stays "Mid-morning", second
+  becomes "Late morning"). Never repeat a title within a day.
+
   Each act has title, time_range, one_liner, narrative, and 0–2
   callouts. `narrative` is 2–4 lines across any period when the content
-  warrants it; one sentence is fine when it doesn't. Callouts highlight
-  specific blocks — GRATIFICATION MONKEY for entertainment, "FOCUS" or
-  "CALL" for other notable blocks. Gratification monkey callouts are
-  REQUIRED for any act with ≥5 minutes of entertainment consumption.
+  warrants it; one sentence is fine when it doesn't.
+
+  NARRATIVE RULES — every sentence must cite something real from the
+  context (an app from hours_by_app, a page title from browser_dwells,
+  an AI wait from ai_waits, a call from calls_and_media, a specific
+  file from an IDE window title). No weather-poet filler. BANNED
+  phrases and anything in their spirit:
+    "Moments of stillness before the chaos."
+    "Continuing the journey."
+    "The day unfolds with potential."
+    "Diving deeper into tasks."
+    "The focus sharpens as the day progresses."
+    "Engaged with various tasks."
+    "The mind wanders through code and ideas."
+    "A busy hour." / "A slow start." / "A focused session." (one_liner)
+    "As the day winds down ..."
+    "The rhythm of the day reflects ..."
+    "A sense of accomplishment lingers in the air."
+    "A steady pace." / "A blend of focus and distraction."
+    "Moments of calm emerge as the mind settles."
+    "Providing a backdrop to the work."
+    "The day begins with ..." / "The morning starts with ..."
+  Any sentence that could be written WITHOUT seeing the user's data
+  is banned. If you catch yourself writing a general mood observation
+  (about rhythm, pace, clarity, chaos, potential, flow), delete it.
+  If you genuinely have nothing specific to say about an act, collapse
+  it into an adjacent act rather than padding. `one_liner` should name
+  the dominant activity in that block, grounded in the data — "Built
+  brainloop", "Read Karpathy's Substack", "Zoom with Priya" — not a
+  mood label.
+
+  Callouts highlight specific blocks — GRATIFICATION MONKEY for
+  entertainment, "FOCUS" or "CALL" for other notable blocks.
+  Gratification monkey callouts are REQUIRED for any act with ≥5
+  minutes of entertainment consumption.
 - widgets: fill every field from the context; if the day has no calls,
   on_calls.count is 0 (not missing).
 - intensity_buckets: pass through the provided buckets verbatim.
