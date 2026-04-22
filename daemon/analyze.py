@@ -274,17 +274,13 @@ def _infer_source_from_title(title: str) -> str:
     #   - "<author> - <title>" with no domain marker (typical YT pattern)
     #   - Anything not matched above with non-trivial length is most likely
     #     a video, given how much of users' browsing time goes to YouTube.
+    # Episode N pattern is a high-confidence YouTube/podcast signal that
+    # generally holds across browsers — keep it. But avoid wider patterns
+    # like "X - Y" or "3+ words → YouTube"; those misfire on Prime Video,
+    # Substack posts, podcast pages, etc. Better to leave the source as
+    # "Web" (which the UI collapses to time-only) than label something
+    # confidently wrong.
     if re.search(r"\bepisode\s+\d+\b|\bep\.?\s*\d+\b", low):
-        return "YouTube"
-    if " - " in t and len(t) > 12:
-        return "YouTube"
-    # Multi-word content title with no platform marker: in this user's data
-    # the dominant fallthrough is YouTube videos (titles like "Battleground",
-    # "Building pi in a World of Slop"). Default to YouTube for any title
-    # of 3+ words that hasn't matched a more specific pattern. Single-word
-    # titles ("Excalidraw", "Notion") stay generic since they're more often
-    # tools/apps than video names.
-    if len(t.split()) >= 3:
         return "YouTube"
 
     return "Web"
