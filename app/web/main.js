@@ -776,8 +776,10 @@ async function wireSettings() {
   tabs.forEach(t => t.addEventListener('click', () => applyPreset(t.dataset.provider)));
 
   // Load whatever is currently saved so the form reflects reality, not
-  // defaults. Falls back to Anthropic preset if the DB has nothing yet.
-  applyPreset('anthropic');
+  // defaults. Falls back to OpenAI preset if the DB has nothing yet —
+  // OpenAI is the cheapest + easiest path and doubles as the base for
+  // OpenRouter / Requesty gateway users.
+  applyPreset('openai');
   try {
     const existing = await invokeCmd('ai_config_load');
     if (existing) {
@@ -953,11 +955,6 @@ function paintPermissions(status) {
       badge.className = `perm-badge ${cls}`;
       badge.textContent = text;
     }
-    // Reveal the "drag brainloopd into the list" helper only when the
-    // system actually says we're not granted — hiding the clutter in
-    // the happy path.
-    const help = row.querySelector('[data-role="help"]');
-    if (help) help.hidden = val !== 'not_granted';
   });
 }
 
@@ -994,7 +991,20 @@ function wirePermissions() {
     });
   });
   const recheck = document.getElementById('perm-recheck');
-  if (recheck) recheck.addEventListener('click', refreshPermissions);
+  if (recheck) {
+    recheck.addEventListener('click', async () => {
+      // Give the click instant visual feedback — flip every badge to
+      // "checking…" before we call the Rust heuristic. Without this the
+      // badge reads whatever it last showed (often "NOT GRANTED") until
+      // the async round-trip returns, which feels like the button did
+      // nothing.
+      document.querySelectorAll('.perm-row[data-perm] [data-role="badge"]').forEach(b => {
+        b.className = 'perm-badge unknown';
+        b.textContent = 'checking…';
+      });
+      await refreshPermissions();
+    });
+  }
 
   const reveal = document.getElementById('reveal-daemon');
   if (reveal) reveal.addEventListener('click', async () => {

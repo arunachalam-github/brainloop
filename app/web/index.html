@@ -78,21 +78,21 @@
             <div class="set-title">AI provider</div>
             <div class="set-desc">Bring your own key. We never see it — queries go straight from your Mac to the provider you pick.</div>
             <div class="provider-tabs" id="provider-tabs">
-              <button type="button" class="provider-tab active" data-provider="anthropic">Anthropic</button>
-              <button type="button" class="provider-tab" data-provider="openai">OpenAI</button>
+              <button type="button" class="provider-tab" data-provider="anthropic">Anthropic</button>
+              <button type="button" class="provider-tab active" data-provider="openai">OpenAI <span class="provider-default-hint">default</span></button>
               <button type="button" class="provider-tab" data-provider="gemini">Gemini</button>
             </div>
             <div class="set-field">
               <label>API key</label>
-              <input type="password" id="set-api-key" placeholder="sk-…  (Anthropic key)" />
+              <input type="password" id="set-api-key" placeholder="sk-…  (OpenAI key)" />
             </div>
             <div class="set-field">
               <label>Model</label>
-              <input id="set-model" value="claude-sonnet-4-5" />
+              <input id="set-model" value="gpt-4o-mini" />
             </div>
             <div class="set-field">
               <label>Base URL</label>
-              <input id="set-base-url" value="https://api.anthropic.com" />
+              <input id="set-base-url" value="https://api.openai.com/v1" />
               <div class="set-hint">Point this at <strong>OpenRouter</strong>, <strong>Requesty</strong>, or any OpenAI-compatible gateway — pick the "OpenAI" tab and paste the gateway URL here. For OpenRouter: <code>https://openrouter.ai/api/v1</code></div>
             </div>
             <div class="set-actions">
@@ -108,7 +108,7 @@
               <div>
                 <div class="perm-name">Accessibility</div>
                 <div class="perm-desc">Window titles, URLs, text of focused elements.</div>
-                <div class="perm-help" data-role="help" hidden>
+                <div class="perm-help" data-role="help">
                   Not in the list? Click <button type="button" class="perm-inline-link" id="reveal-daemon">Show daemon in Finder</button>, then drag <code>brainloopd</code> from Finder into the Accessibility list in System Settings and toggle it on.
                 </div>
               </div>

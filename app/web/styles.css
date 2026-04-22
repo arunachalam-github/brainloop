@@ -860,6 +860,21 @@ a { color: inherit; }
   transition: all 600ms var(--ease-calm);
 }
 .provider-tab.active { background: var(--ink); color: var(--cream); }
+.provider-default-hint {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  border-radius: 999px;
+  background: rgba(243, 237, 226, 0.18);
+  color: inherit;
+  opacity: 0.65;
+  text-transform: uppercase;
+}
+.provider-tab:not(.active) .provider-default-hint {
+  background: rgba(34, 26, 18, 0.08);
+  color: var(--ink-60);
+}
 
 .set-hint {
   margin-top: 6px;
