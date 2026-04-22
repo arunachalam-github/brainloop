@@ -78,16 +78,24 @@ def get_browser_url(pid: int, bundle_id: str) -> str | None:
     Chrome AppleScript dictionary, which Comet inherits verbatim. Costs ~50ms
     per browser heartbeat but only when the AX walk has already failed.
     """
-    if bundle_id not in BROWSER_BUNDLES or not AS.AXIsProcessTrusted():
+    if bundle_id not in BROWSER_BUNDLES:
         return None
-    app_elem = AS.AXUIElementCreateApplication(pid)
-    err, win = AS.AXUIElementCopyAttributeValue(
-        app_elem, AS.kAXFocusedWindowAttribute, None
-    )
-    if err == AS.kAXErrorSuccess and win:
-        url = _find_url(win, depth=0)
-        if url:
-            return url
+    # AX walk needs AX trust — try it first when we have it (free, instant
+    # for Chrome/Safari/Arc/Edge whose address bar IS an AXTextField).
+    if AS.AXIsProcessTrusted():
+        app_elem = AS.AXUIElementCreateApplication(pid)
+        err, win = AS.AXUIElementCopyAttributeValue(
+            app_elem, AS.kAXFocusedWindowAttribute, None
+        )
+        if err == AS.kAXErrorSuccess and win:
+            url = _find_url(win, depth=0)
+            if url:
+                return url
+    # AppleScript fallback does NOT need AX — only the per-app "Allow
+    # JavaScript from Apple Events" permission, which the user almost
+    # certainly already enabled to make page_text work. So Comet (and any
+    # other Chromium fork without an AXTextField address bar) gets a URL
+    # even when brainloopd has zero TCC grants.
     return _applescript_url(bundle_id)
 
 
