@@ -606,32 +606,24 @@ a { color: inherit; }
 .app-bar .mins { color: var(--ink-60); text-align: right; }
 .app-bar .name { color: var(--ink); }
 
-/* Reading list */
+/* Reading list — line 1: title (full ink); line 2: time · source (muted mono) */
 .read-row {
-  display: grid;
-  grid-template-columns: 48px 1fr auto;
-  gap: 16px;
   padding: 10px 0;
   border-bottom: 1px solid var(--ink-06);
-  align-items: baseline;
   font-size: 13px;
 }
 .read-row:last-child { border-bottom: none; }
-.read-row .t {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ink-40);
-  font-variant-numeric: tabular-nums;
-}
 .read-row .title {
   color: var(--ink);
   text-wrap: balance;
+  margin-bottom: 2px;
 }
-.read-row .where {
+.read-row .meta {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-40);
   letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
 .break-chips {

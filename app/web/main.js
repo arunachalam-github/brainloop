@@ -551,13 +551,28 @@ function renderWidgets(w) {
         </div>`).join('')
     : `<div class="widget-sub" style="margin-top: 4px;">No real breaks recorded.</div>`;
 
+  // Build the line-2 metadata: "HH:MM · source", dropping `· source` when
+  // source is empty OR when it equals the title (e.g. landing on
+  // hn.ycombinator.com gives title="Hacker News" + source="Hacker News" →
+  // "Hacker News" twice reads as a typo, not editorial). Case-insensitive
+  // exact-match keeps real differentiation (e.g. "Hacker News Top" vs
+  // "Hacker News" still pairs).
+  const norm = (s) => String(s || '').trim().toLowerCase();
   const readRows = reading.length
-    ? reading.map(r => `
-        <div class="read-row">
-          <div class="t">${escapeHtml(r.time || '')}</div>
-          <div class="title">${escapeHtml(r.title || '')}</div>
-          <div class="where">${escapeHtml(r.source || '')}</div>
-        </div>`).join('')
+    ? reading.map(r => {
+        const time = r.time || '';
+        const title = r.title || '';
+        const source = r.source || '';
+        const showSource = source && norm(source) !== norm(title);
+        const meta = showSource
+          ? `${escapeHtml(time)} · ${escapeHtml(source)}`
+          : escapeHtml(time);
+        return `
+          <div class="read-row">
+            <div class="title">${escapeHtml(title)}</div>
+            <div class="meta">${meta}</div>
+          </div>`;
+      }).join('')
     : `<div class="widget-sub" style="margin-top: 4px;">Nothing caught yet.</div>`;
 
   return `
