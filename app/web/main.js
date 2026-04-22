@@ -314,13 +314,34 @@ function wireVizHover(canvas, tooltip) {
 
   let activeIdx = -1;
 
+  // Render dwell as "Ns" up to 60s, then "Nm" rounded.
+  const fmtDwell = (secs) => {
+    if (secs < 60) return `${secs}s`;
+    return `${Math.round(secs / 60)}m`;
+  };
+
+  // Render the items list once data is available; falls back to a quiet
+  // "no titles captured" line when the bucket had heartbeats but every
+  // window_title was empty (AX denied + no Quartz fallback hit).
+  const renderItems = (items) => {
+    if (!items || !items.length) return '';
+    const rows = items.map(it => `
+      <div class="t-item">
+        <span class="t-item-title">${escapeHtml(it.title)}</span>
+        <span class="t-item-dwell">${fmtDwell(it.dwell_secs)}</span>
+      </div>`).join('');
+    return `<div class="t-divider"></div><div class="t-items">${rows}</div>`;
+  };
+
   const render = async (b, idx) => {
+    const itemsHtml = b._items !== undefined ? renderItems(b._items) : '';
     tooltip.innerHTML = `
       <div class="t-time">${escapeHtml(fmtClock(b.start_ts))} – ${escapeHtml(fmtClock(b.start_ts + 600))}</div>
       <div class="t-state">
         <span class="t-dot" style="background:${STATE_DOT_COLOR[b.state] || STATE_DOT_COLOR.empty}"></span>
         ${escapeHtml(b.state)} · ${b.count} switch${b.count === 1 ? '' : 'es'}
       </div>
+      <div class="t-items-slot" id="t-items-${idx}">${itemsHtml}</div>
       <div class="t-apps" id="t-apps-${idx}">${b._apps ? escapeHtml(b._apps) : '…'}</div>`;
 
     if (b._apps !== undefined) return;
@@ -328,12 +349,16 @@ function wireVizHover(canvas, tooltip) {
       const res = await invokeCmd('bucket_apps', { startTs: b.start_ts, endTs: b.start_ts + 600 });
       const apps = res?.apps?.map(a => a.app).filter(Boolean) || [];
       b._apps = apps.length ? apps.join(' · ') : '(no capture in this window)';
+      b._items = res?.items || [];
       if (activeIdx === idx) {
-        const el = tooltip.querySelector(`#t-apps-${idx}`);
-        if (el) el.textContent = b._apps;
+        const appsEl = tooltip.querySelector(`#t-apps-${idx}`);
+        if (appsEl) appsEl.textContent = b._apps;
+        const itemsEl = tooltip.querySelector(`#t-items-${idx}`);
+        if (itemsEl) itemsEl.innerHTML = renderItems(b._items);
       }
     } catch (_e) {
       b._apps = '';
+      b._items = [];
     }
   };
 

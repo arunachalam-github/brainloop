@@ -163,21 +163,126 @@ struct AppSlice {
 }
 
 #[derive(Serialize)]
+struct ContentItem {
+    title: String,       // cleaned content title (page title, file name, etc.)
+    app: String,         // source app
+    dwell_secs: i64,     // heartbeats × 60s
+}
+
+#[derive(Serialize)]
 struct BucketApps {
     apps: Vec<AppSlice>,
+    items: Vec<ContentItem>,
     total_rows: i64,
 }
 
-/// Top apps inside a `[start_ts, end_ts)` time window, ordered by heartbeat
-/// row count. Used by the waveform hover tooltip to say what the user was
-/// actually doing in that 10-minute bucket. Each `minutes` is the number of
-/// activity_log rows (heartbeats + events), not literal minutes — but at the
-/// current 60 s heartbeat cadence it's close enough that the label reads cleanly.
+/// Strip well-known browser-tab title suffixes ("- YouTube", "| Hacker News",
+/// etc.) so a 10-min bucket containing 3 different YouTube videos shows the
+/// video names rather than 3 entries reading "Foo - YouTube", "Bar - YouTube".
+fn clean_browser_title(title: &str) -> String {
+    let suffixes: &[&str] = &[
+        " - YouTube", " - Google Search", " - Google Docs", " - Google Sheets",
+        " - Google Slides", " - Gmail", " - Notion",
+        " | Hacker News", " · Hacker News",
+        " / X", " / Twitter", " - Twitter",
+        " - Reddit", " : r/all", " : r/popular",
+        " - GitHub", " · GitHub", " · Issue · GitHub", " · Pull Request · GitHub",
+        " - Substack", " | Substack",
+        " - Stack Overflow",
+        " - Wikipedia",
+        " - LinkedIn",
+        " | Medium",
+    ];
+    let trimmed = title.trim();
+    for s in suffixes {
+        if let Some(rest) = trimmed.strip_suffix(s) {
+            let cleaned = rest.trim();
+            if !cleaned.is_empty() {
+                return cleaned.to_string();
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+/// Strip leading "spinner / status" glyphs that long-running terminal apps
+/// rotate through their window title (✳, ⠂, ⠐, ⠁, ⠈ — Braille block U+2800–28FF,
+/// plus a couple of dingbats). Without this, a single in-progress task in
+/// iTerm gets bucketed as 3 different "apps" because each spinner frame ends
+/// up as a distinct GROUP BY key.
+fn strip_status_glyphs(s: &str) -> &str {
+    let mut s = s.trim_start();
+    loop {
+        let next = s.chars().next();
+        match next {
+            Some(c) if (0x2800..=0x28FF).contains(&(c as u32)) => {
+                s = s[c.len_utf8()..].trim_start();
+            }
+            Some('✳') | Some('●') | Some('○') | Some('◆') | Some('◇')
+            | Some('⏳') | Some('⏱') | Some('⚠') | Some('⚡') => {
+                s = s[next.unwrap().len_utf8()..].trim_start();
+            }
+            _ => break,
+        }
+    }
+    s
+}
+
+/// Per-app rules for turning a window_title into a display title.
+/// Returns None to drop the row entirely (system overlay etc.).
+fn canonical_title(app_name: &str, window_title: &str) -> Option<String> {
+    let title = strip_status_glyphs(window_title);
+    if title.is_empty() {
+        return None;
+    }
+    // Drop system / overlay apps that produce titles but aren't real activity.
+    if matches!(
+        app_name,
+        "loginwindow" | "Notification Center" | "WindowManager"
+            | "SystemUIServer" | "Control Center" | "Dock" | "Spotlight"
+    ) {
+        return None;
+    }
+
+    // IDEs use "filename — project" or "● filename — project". The leading
+    // ● indicates unsaved; strip it. Take the file name (left side).
+    const IDES: &[&str] = &[
+        "Code", "Cursor", "Xcode", "IntelliJ IDEA", "WebStorm", "PyCharm",
+        "Android Studio", "RubyMine", "CLion", "GoLand", "Rider", "Nova",
+        "Sublime Text", "TextMate", "BBEdit", "Zed",
+    ];
+    if IDES.contains(&app_name) {
+        let cleaned = title.trim_start_matches('●').trim();
+        if let Some((file, _)) = cleaned.split_once(" — ") {
+            let f = file.trim();
+            if !f.is_empty() {
+                return Some(f.to_string());
+            }
+        }
+        return Some(cleaned.to_string());
+    }
+
+    // Browsers — strip platform suffix from the page title.
+    const BROWSERS: &[&str] = &[
+        "Google Chrome", "Safari", "Arc", "Brave Browser", "Microsoft Edge",
+        "Comet", "Vivaldi", "Chromium", "Firefox", "DuckDuckGo", "Opera",
+    ];
+    if BROWSERS.contains(&app_name) {
+        let cleaned = clean_browser_title(title);
+        return if cleaned.is_empty() { None } else { Some(cleaned) };
+    }
+
+    Some(title.to_string())
+}
+
+/// Top apps + content items inside a `[start_ts, end_ts)` window. Used by
+/// the waveform hover tooltip. `apps` is the existing app-strip line; `items`
+/// is the new content list (top 3 things the user actually attended to).
 #[tauri::command]
 fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
     let path = db_path();
     if !path.exists() {
-        return Ok(BucketApps { apps: vec![], total_rows: 0 });
+        return Ok(BucketApps { apps: vec![], items: vec![], total_rows: 0 });
     }
     let conn = open_read_only()?;
 
@@ -189,7 +294,8 @@ fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
         )
         .unwrap_or(0);
 
-    let mut stmt = conn
+    // ── App strip (existing): top apps by heartbeat count ─────────────────
+    let mut app_stmt = conn
         .prepare(
             "SELECT COALESCE(app_name, '—') AS app, COUNT(*) AS n
              FROM activity_log
@@ -200,7 +306,7 @@ fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
         )
         .map_err(|e| e.to_string())?;
 
-    let apps: Vec<AppSlice> = stmt
+    let apps: Vec<AppSlice> = app_stmt
         .query_map([start_ts, end_ts], |row| {
             Ok(AppSlice {
                 app: row.get::<_, String>(0)?,
@@ -211,7 +317,80 @@ fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
         .filter_map(|r| r.ok())
         .collect();
 
-    Ok(BucketApps { apps, total_rows })
+    // ── Content items (new): heartbeats grouped by canonical title ────────
+    //
+    // We take heartbeat rows only (1 per minute per active app), so the
+    // count is a faithful dwell estimate. window_title must be non-empty;
+    // empty titles either mean AX is denied or the app is system chrome.
+    let mut content_stmt = conn
+        .prepare(
+            "SELECT COALESCE(app_name, '') AS app,
+                    COALESCE(window_title, '') AS title,
+                    COUNT(*) AS heartbeats
+             FROM activity_log
+             WHERE ts >= ? AND ts < ?
+               AND trigger = 'heartbeat'
+               AND COALESCE(window_title, '') != ''
+             GROUP BY app, title
+             ORDER BY heartbeats DESC
+             LIMIT 30",
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Aggregate into a map keyed by (app, canonical_title) — same canonical
+    // title in different apps stays separate (e.g. Google Doc opened in both
+    // Comet and Chrome should show with each browser as its own row, since
+    // we deliberately want to surface where the activity actually happened).
+    use std::collections::HashMap;
+    let mut agg: HashMap<(String, String), i64> = HashMap::new();
+    let mut order: Vec<(String, String)> = Vec::new();
+    let raw_rows = content_stmt
+        .query_map([start_ts, end_ts], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok());
+
+    for (app, title, heartbeats) in raw_rows {
+        let canon = match canonical_title(&app, &title) {
+            Some(t) => t,
+            None => continue,
+        };
+        let key = (app.clone(), canon);
+        if !agg.contains_key(&key) {
+            order.push(key.clone());
+        }
+        *agg.entry(key).or_insert(0) += heartbeats;
+    }
+
+    // Sort by dwell desc, ties broken by first-seen order from `order`.
+    let mut keys: Vec<&(String, String)> = agg.keys().collect();
+    keys.sort_by(|a, b| {
+        let da = agg[*a];
+        let db = agg[*b];
+        db.cmp(&da)
+            .then_with(|| {
+                let ai = order.iter().position(|k| k == *a).unwrap_or(usize::MAX);
+                let bi = order.iter().position(|k| k == *b).unwrap_or(usize::MAX);
+                ai.cmp(&bi)
+            })
+    });
+
+    let items: Vec<ContentItem> = keys
+        .into_iter()
+        .take(3)
+        .map(|k| ContentItem {
+            title: k.1.clone(),
+            app: k.0.clone(),
+            dwell_secs: agg[k] * 60, // 1 heartbeat ≈ 60s of dwell
+        })
+        .collect();
+
+    Ok(BucketApps { apps, items, total_rows })
 }
 
 #[derive(Serialize)]
