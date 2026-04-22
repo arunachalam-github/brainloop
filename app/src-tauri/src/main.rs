@@ -222,21 +222,22 @@ struct PermissionsStatus {
 
 /// Best-effort Accessibility detection for the daemon.
 ///
-/// We don't call AXIsProcessTrusted() directly — TCC grants are per-binary,
-/// and the UI and daemon are different binaries, so a UI self-check would
-/// lie. Instead we look at capture behavior over the LAST 10 heartbeat
-/// rows (~10 min). For each row we know whether window_title was captured.
-/// A majority rule shakes off stale rows from a freshly-revoked grant:
+/// We can't call AXIsProcessTrusted() on the daemon from the UI — TCC
+/// grants are per-binary. Instead we read the FRESHEST heartbeat rows
+/// (last 180s only) and infer from whether window_title was captured.
 ///
-///   - ≥ 4/10 non-loginwindow rows with a populated window_title → granted.
-///     (Threshold < 50% so a quick grant while the user is mid-app-switch
-///     still flips green.)
-///   - ≥ 4/10 non-loginwindow rows with no title          → not_granted.
-///   - too few non-loginwindow rows (locked screen, etc.) → unknown.
+/// Narrow window (180s, ~3 heartbeats) is deliberate: when the user
+/// toggles AX in System Settings, the badge should flip within a couple
+/// of minutes, not ten. Older rows from before the toggle are ignored
+/// entirely so they can't dominate the vote.
 ///
-/// If the user revokes AX, old titled rows still sit in the DB, but within
-/// ~5-10 minutes the new null-title heartbeats outnumber them and the
-/// badge flips. Same behavior on grant — new titles quickly dominate.
+/// Rules, evaluated in order:
+///   1. Newest heartbeat is > 180s old  → "unknown" (daemon not writing).
+///   2. ≥1 fresh row with a window_title and 0 fresh rows without       → "granted".
+///   3. ≥1 fresh row without a window_title and 0 fresh rows with        → "not_granted".
+///   4. Fresh rows split (daemon running but AX was just toggled — use
+///      the majority among rows from the last 180s; tie goes to newest).
+///   5. No fresh non-loginwindow rows                                    → "unknown".
 #[tauri::command]
 fn permissions_status() -> Result<PermissionsStatus, String> {
     let mut out = PermissionsStatus {
@@ -249,26 +250,44 @@ fn permissions_status() -> Result<PermissionsStatus, String> {
     }
     let conn = open_read_only()?;
 
+    // Rust-side "now" in unix seconds; the DB stores `ts` as unix float.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+
+    const FRESH_WINDOW_SECS: f64 = 180.0; // last 3 minutes
+
     let mut stmt = conn
         .prepare(
-            "SELECT window_title, app_name FROM activity_log
+            "SELECT window_title, app_name, ts FROM activity_log
              WHERE trigger = 'heartbeat'
-             ORDER BY ts DESC LIMIT 10",
+             ORDER BY ts DESC LIMIT 20",
         )
         .map_err(|e| e.to_string())?;
-    let rows = stmt
+    let rows_iter = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, Option<String>>(0)?,
                 row.get::<_, Option<String>>(1)?,
+                row.get::<_, f64>(2)?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
-    let mut non_login_with_title = 0;
-    let mut non_login_without_title = 0;
-    for r in rows.filter_map(|r| r.ok()) {
-        let (title, app) = r;
+    // Keep heartbeats from inside the fresh window, newest first.
+    let mut fresh_titled = 0u32;
+    let mut fresh_untitled = 0u32;
+    let mut newest_ts: Option<f64> = None;
+    let mut newest_has_title: Option<bool> = None;
+    for r in rows_iter.filter_map(|r| r.ok()) {
+        let (title, app, ts) = r;
+        if newest_ts.is_none() {
+            newest_ts = Some(ts);
+        }
+        if now - ts > FRESH_WINDOW_SECS {
+            break; // rows are ordered newest-first, rest are older
+        }
         let is_user_app = app
             .as_deref()
             .map(|s| !s.is_empty() && s != "loginwindow")
@@ -280,18 +299,37 @@ fn permissions_status() -> Result<PermissionsStatus, String> {
             .as_deref()
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
+        if newest_has_title.is_none() {
+            newest_has_title = Some(has_title);
+        }
         if has_title {
-            non_login_with_title += 1;
+            fresh_titled += 1;
         } else {
-            non_login_without_title += 1;
+            fresh_untitled += 1;
         }
     }
 
-    const THRESHOLD: u32 = 4; // out of 10
-    out.accessibility = if non_login_with_title >= THRESHOLD {
+    // If the most recent heartbeat is stale, the daemon isn't writing —
+    // we have no signal either way.
+    let stale = match newest_ts {
+        Some(ts) => now - ts > FRESH_WINDOW_SECS,
+        None => true,
+    };
+    if stale {
+        return Ok(out); // already "unknown"
+    }
+
+    out.accessibility = if fresh_titled > 0 && fresh_untitled == 0 {
         "granted".into()
-    } else if non_login_without_title >= THRESHOLD {
+    } else if fresh_untitled > 0 && fresh_titled == 0 {
         "not_granted".into()
+    } else if fresh_titled > fresh_untitled {
+        "granted".into()
+    } else if fresh_untitled > fresh_titled {
+        "not_granted".into()
+    } else if let Some(latest) = newest_has_title {
+        // Tie — trust the most recent heartbeat.
+        if latest { "granted".into() } else { "not_granted".into() }
     } else {
         "unknown".into()
     };
