@@ -112,8 +112,13 @@ def main() -> None:
     log.info("brainloop daemon starting")
     log.info("DB: %s", DB_PATH)
 
-    # Check Accessibility permission (prompt if missing)
-    ax_ok = AS.AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": True})
+    # Check Accessibility permission silently. We deliberately do NOT use
+    # `AXTrustedCheckOptionPrompt: True` here — the daemon restarts on every
+    # upgrade (and the binary signature changes, which invalidates the TCC
+    # grant), so a prompting check would surface a macOS popup on every
+    # restart until the user re-grants. The Settings UI has its own
+    # permission panel that shows this state without a modal.
+    ax_ok = AS.AXIsProcessTrusted()
     if ax_ok:
         log.info("Accessibility permission: granted")
     else:
