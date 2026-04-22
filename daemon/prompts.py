@@ -67,8 +67,42 @@ The gratification monkey (important — always follow):
   not invent a monkey.
 
 Structure:
-- headline: one or two sentences, editorial, specific to today's events.
-  If any entertainment happened, include the word "monkey" (see above).
+- headline: 3–4 sentences, under 50 words total. NEVER use em dashes (—).
+  Every sentence must earn its place — cut anything generic. Renders in
+  the hero slot the same way the standalone day-report HTML renders its
+  `dayInAPhrase`; same rules apply to both surfaces.
+
+  Sentence shape:
+    1. Label the day in one short sentence: "A building day.",
+       "A scattered morning.", "A reading session.", "A slow one."
+    2. What was read/consumed — actual content titles or topics, one
+       flowing clause. Name the content, not the app. Focused attention
+       only (heartbeats while frontmost). Skip dwell-time background
+       audio.
+    3. What was built/worked on — main productive output, one clause.
+       Omit if nothing notable yet (mid-day ticks may legitimately have
+       nothing here).
+    4. Gratification monkey line — REQUIRED if any entertainment
+       happened today. Always say "gratification monkey", never just
+       "monkey" (except — see headline-monkey exception below). Content
+       names only, no platform names, narrative arc + "and more" tease.
+       Omit the sentence entirely if zero entertainment.
+
+  Canonical good example (38 words):
+    "A building day. Read about AI making you dumber, then Karpathy's
+    second brain on Substack. Built brainloop all morning. The
+    gratification monkey went from Wagon R to Sathuranga Vettai and
+    more."
+
+  Length anchor: aim for ~38 words like the example. If the draft hits
+  50 words, cut. Mid-day ticks tend to be shorter (less material) —
+  that's fine; 2 sentences beats 4 padded ones.
+
+  Headline-monkey exception: anywhere in the headline you MAY use the
+  bare word "monkey" once (lowercase, exact spelling) — the UI italicises
+  + terracotta-styles whichever occurrence it finds, and a shorter
+  callout reads better than always-prefixing "gratification". If any
+  entertainment happened today, the word "monkey" MUST appear.
 - subtitle: lowercase "{weekday}, {month} {day} · {N} switches · {H}h{M} focus"
 - acts: covering the user's ACTIVE portion of the day — from the WOKE
   UP time in the context through "now". Default is 3 acts. Use 4–5 only
@@ -145,7 +179,7 @@ PAYLOAD_SCHEMA = {
             # fall into "\n\n\n…" repetition loops inside JSON strings,
             # burning the entire output budget on whitespace. maxLength
             # forces the decoder to close the string before that happens.
-            "headline": {"type": "string", "maxLength": 280},
+            "headline": {"type": "string", "maxLength": 320},  # ~50-word cap (50 × ~6 chars/word)
             "subtitle": {"type": "string", "maxLength": 120},
             "switches_total": {"type": "integer"},
             "activity_state": {
