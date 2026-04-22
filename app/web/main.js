@@ -551,22 +551,24 @@ function renderWidgets(w) {
         </div>`).join('')
     : `<div class="widget-sub" style="margin-top: 4px;">No real breaks recorded.</div>`;
 
-  // Build the line-2 metadata: "HH:MM · source", dropping `· source` when
-  // source is empty OR when it equals the title (e.g. landing on
-  // hn.ycombinator.com gives title="Hacker News" + source="Hacker News" →
-  // "Hacker News" twice reads as a typo, not editorial). Case-insensitive
-  // exact-match keeps real differentiation (e.g. "Hacker News Top" vs
-  // "Hacker News" still pairs).
+  // Build the meta column: "HH:MM · source". Drop `· source` when source
+  // adds no information — empty, equals the title (e.g. title="Hacker News"
+  // + source="Hacker News" reads as a typo), or is the generic "Web"
+  // placeholder the LLM uses when it can't classify (better to show just
+  // a clean time than pad with "WEB").
   const norm = (s) => String(s || '').trim().toLowerCase();
+  const isUseless = (s, t) => {
+    const n = norm(s);
+    return !n || n === norm(t) || n === 'web';
+  };
   const readRows = reading.length
     ? reading.map(r => {
         const time = r.time || '';
         const title = r.title || '';
         const source = r.source || '';
-        const showSource = source && norm(source) !== norm(title);
-        const meta = showSource
-          ? `${escapeHtml(time)} · ${escapeHtml(source)}`
-          : escapeHtml(time);
+        const meta = isUseless(source, title)
+          ? escapeHtml(time)
+          : `${escapeHtml(time)} · ${escapeHtml(source)}`;
         return `
           <div class="read-row">
             <div class="title">${escapeHtml(title)}</div>

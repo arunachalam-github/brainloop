@@ -278,6 +278,14 @@ def _infer_source_from_title(title: str) -> str:
         return "YouTube"
     if " - " in t and len(t) > 12:
         return "YouTube"
+    # Multi-word content title with no platform marker: in this user's data
+    # the dominant fallthrough is YouTube videos (titles like "Battleground",
+    # "Building pi in a World of Slop"). Default to YouTube for any title
+    # of 3+ words that hasn't matched a more specific pattern. Single-word
+    # titles ("Excalidraw", "Notion") stay generic since they're more often
+    # tools/apps than video names.
+    if len(t.split()) >= 3:
+        return "YouTube"
 
     return "Web"
 
@@ -303,13 +311,12 @@ def _sanitize_payload(payload: dict) -> None:
         if not isinstance(it, dict):
             continue
         src = (it.get("source") or "").strip()
-        if src.lower() in _BROWSER_SOURCES:
-            it["source"] = "Web"
-        elif not src:
-            # LLM dropped source entirely (typically because URL was NULL
-            # and it couldn't classify from page_text either). Backfill so
-            # the row still reads as something rather than time-only.
-            it["source"] = _infer_source_from_title(it.get("title") or "")
+        # Treat browser-app names AND the generic "Web" placeholder as
+        # candidates for upgrade — they're both signals that the LLM
+        # couldn't classify and we should try harder from the title alone.
+        if not src or src.lower() in _BROWSER_SOURCES or src.lower() == "web":
+            inferred = _infer_source_from_title(it.get("title") or "")
+            it["source"] = inferred or "Web"
     if "widgets" in payload:
         payload["widgets"]["things_read"] = items
 

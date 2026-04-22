@@ -226,9 +226,12 @@ a { color: inherit; }
 .hero-phrase {
   font-family: var(--display);
   font-size: clamp(22px, 2.8vw, 42px);
-  line-height: 1.12;
+  line-height: 1.18;
   letter-spacing: -0.02em;
-  max-width: 50vw;
+  /* 50-word headlines (the dayInAPhrase format) need ~75% of viewport
+     to read in 3 lines instead of 5; old 50vw cap left huge dead space
+     on the right and broke the rhythm. */
+  max-width: 75vw;
   text-wrap: balance;
   font-weight: 400;
 }
@@ -606,8 +609,14 @@ a { color: inherit; }
 .app-bar .mins { color: var(--ink-60); text-align: right; }
 .app-bar .name { color: var(--ink); }
 
-/* Reading list — line 1: title (full ink); line 2: time · source (muted mono) */
+/* Reading list — title left, "time · source" right-aligned on the same row.
+   Single-line layout so the row visually fills the widget width and the
+   right edge isn't empty. Meta wraps under the title only on narrow widgets. */
 .read-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
   padding: 10px 0;
   border-bottom: 1px solid var(--ink-06);
   font-size: 13px;
@@ -616,7 +625,8 @@ a { color: inherit; }
 .read-row .title {
   color: var(--ink);
   text-wrap: balance;
-  margin-bottom: 2px;
+  flex: 1;
+  min-width: 0;
 }
 .read-row .meta {
   font-family: var(--mono);
@@ -624,6 +634,8 @@ a { color: inherit; }
   color: var(--ink-40);
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .break-chips {
