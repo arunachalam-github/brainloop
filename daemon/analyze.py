@@ -234,12 +234,62 @@ def _extract_platform(url: str | None) -> str:
         return ""
 
 
+def _infer_source_from_title(title: str) -> str:
+    """Last-ditch platform guess from a content title alone.
+
+    Used when both `platform` (URL-derived ground truth) and the LLM's own
+    inference came back empty — typically because the dwell happened in a
+    browser whose URL the daemon couldn't read at the time (Comet pre-fix,
+    or any user with AX denied). Better to surface a confident-but-generic
+    label than to leave line 2 reading just "08:25" with no source at all.
+
+    Order matters: more specific patterns first (Substack-style author posts,
+    Reddit r/X, GitHub PR/Issue) before falling back to generic "Video" or
+    "Article".
+    """
+    t = title.strip()
+    if not t:
+        return ""
+    low = t.lower()
+
+    # Hacker News landings
+    if low in ("hacker news", "hn", "hacker news front page", "hacker news top"):
+        return "Hacker News"
+    # Reddit pattern: "r/<sub>" anywhere in the title
+    import re
+    if re.search(r"\br/\w+", t):
+        return "Reddit"
+    # Twitter/X pattern: leading "@handle"
+    if re.match(r"^@\w+", t):
+        return "X"
+    # GitHub patterns
+    if re.search(r"#\d+|\bpull request\b|\bissue\b", low):
+        return "GitHub"
+    # Substack — "Author Name - Post Title" with capital words on both sides
+    # is the giveaway, but author dashes are common to YouTube too. Prefer
+    # the YouTube guess for those (videos dominate the dataset).
+
+    # YouTube heuristics:
+    #   - "Episode N" or "Ep N" patterns (podcast/series videos)
+    #   - "<author> - <title>" with no domain marker (typical YT pattern)
+    #   - Anything not matched above with non-trivial length is most likely
+    #     a video, given how much of users' browsing time goes to YouTube.
+    if re.search(r"\bepisode\s+\d+\b|\bep\.?\s*\d+\b", low):
+        return "YouTube"
+    if " - " in t and len(t) > 12:
+        return "YouTube"
+
+    return "Web"
+
+
 def _sanitize_payload(payload: dict) -> None:
     """Post-process the LLM payload to shake off a few repeatable model tics.
 
     1. Relabel browser-app source values ("Chrome", "Comet") in things_read
        to "Web" when platform inference fails upstream.
-    2. Deduplicate `acts`: when the day just started, a model will
+    2. Backfill empty `source` from a title-only heuristic so the UI never
+       shows a row with just a time and a blank source pill.
+    3. Deduplicate `acts`: when the day just started, a model will
        sometimes emit two identical "Now" acts (same title + narrative) to
        satisfy prior minimum-count schemas. Drop any act that repeats the
        (title, time_range, narrative) signature of an earlier one.
@@ -255,6 +305,11 @@ def _sanitize_payload(payload: dict) -> None:
         src = (it.get("source") or "").strip()
         if src.lower() in _BROWSER_SOURCES:
             it["source"] = "Web"
+        elif not src:
+            # LLM dropped source entirely (typically because URL was NULL
+            # and it couldn't classify from page_text either). Backfill so
+            # the row still reads as something rather than time-only.
+            it["source"] = _infer_source_from_title(it.get("title") or "")
     if "widgets" in payload:
         payload["widgets"]["things_read"] = items
 
