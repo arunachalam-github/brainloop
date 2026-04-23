@@ -69,16 +69,64 @@ def get_window_title(pid: int | None) -> str | None:
 # ── Browser URL ───────────────────────────────────────────────────────────────
 
 def get_browser_url(pid: int, bundle_id: str) -> str | None:
-    """Return the URL from the browser address bar, or None if not a browser."""
-    if bundle_id not in BROWSER_BUNDLES or not AS.AXIsProcessTrusted():
+    """Return the URL from the browser address bar, or None if not a browser.
+
+    Strategy: AX tree walk first (free, ~instant) for browsers whose address
+    bar is a real AXTextField (Chrome, Safari, Arc, Edge…). For Chromium-derived
+    browsers that ship a custom React/Electron URL bar (Comet is the canonical
+    case — its address bar isn't an AXTextField at all), fall back to the
+    Chrome AppleScript dictionary, which Comet inherits verbatim. Costs ~50ms
+    per browser heartbeat but only when the AX walk has already failed.
+    """
+    if bundle_id not in BROWSER_BUNDLES:
         return None
-    app_elem = AS.AXUIElementCreateApplication(pid)
-    err, win = AS.AXUIElementCopyAttributeValue(
-        app_elem, AS.kAXFocusedWindowAttribute, None
+    # AX walk needs AX trust — try it first when we have it (free, instant
+    # for Chrome/Safari/Arc/Edge whose address bar IS an AXTextField).
+    if AS.AXIsProcessTrusted():
+        app_elem = AS.AXUIElementCreateApplication(pid)
+        err, win = AS.AXUIElementCopyAttributeValue(
+            app_elem, AS.kAXFocusedWindowAttribute, None
+        )
+        if err == AS.kAXErrorSuccess and win:
+            url = _find_url(win, depth=0)
+            if url:
+                return url
+    # AppleScript fallback does NOT need AX — only the per-app "Allow
+    # JavaScript from Apple Events" permission, which the user almost
+    # certainly already enabled to make page_text work. So Comet (and any
+    # other Chromium fork without an AXTextField address bar) gets a URL
+    # even when brainloopd has zero TCC grants.
+    return _applescript_url(bundle_id)
+
+
+def _applescript_url(bundle_id: str) -> str | None:
+    """Fetch the front tab's URL via the Chrome AppleScript dictionary.
+
+    Only browsers in `_APPLESCRIPT_APP_NAMES` implement the Chrome `URL of
+    active tab of front window` accessor. Returns None for everything else
+    (Firefox, Opera, DuckDuckGo) or when osascript fails.
+    """
+    app_name = _APPLESCRIPT_APP_NAMES.get(bundle_id)
+    if not app_name:
+        return None
+    script = (
+        f'tell application "{app_name}" to '
+        f'get URL of active tab of front window'
     )
-    if err != AS.kAXErrorSuccess or not win:
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=2,
+        )
+        url = result.stdout.strip()
+        # Match the AX walker's filter: only real web URLs are useful for
+        # platform classification. chrome://newtab/, about:blank, file:// etc.
+        # carry no signal for the day report.
+        if url.startswith(("http://", "https://", "www.")):
+            return url
         return None
-    return _find_url(win, depth=0)
+    except Exception:
+        return None
 
 
 def _find_url(element, depth: int) -> str | None:
@@ -109,13 +157,28 @@ def _find_url(element, depth: int) -> str | None:
 # ── Browser page text (AppleScript JS injection) ──────────────────────────────
 
 # AppleScript-compatible app names for each supported browser bundle ID.
-# Firefox is excluded — it does not support AppleScript JS execution.
+# Only browsers that implement Chrome/Safari-style `execute javascript` are
+# listed here. Firefox (and its forks), Opera, and DuckDuckGo are intentionally
+# omitted — they capture URLs but not page_text.
 _APPLESCRIPT_APP_NAMES: dict[str, str] = {
-    "com.google.Chrome":           "Google Chrome",
-    "com.apple.Safari":            "Safari",
-    "com.brave.Browser":           "Brave Browser",
-    "com.microsoft.edgemac":       "Microsoft Edge",
-    "company.thebrowser.Browser":  "Arc",
+    # Mainstream
+    "com.google.Chrome":                   "Google Chrome",
+    "com.apple.Safari":                    "Safari",
+    "com.brave.Browser":                   "Brave Browser",
+    "com.microsoft.edgemac":               "Microsoft Edge",
+    "company.thebrowser.Browser":          "Arc",
+    # AI / alt Chromium forks
+    "ai.perplexity.comet":                 "Comet",
+    "com.vivaldi.Vivaldi":                 "Vivaldi",
+    "org.chromium.Chromium":               "Chromium",
+    # Pre-release channels
+    "com.google.Chrome.canary":            "Google Chrome Canary",
+    "com.google.Chrome.beta":              "Google Chrome Beta",
+    "com.google.Chrome.dev":               "Google Chrome Dev",
+    "com.apple.SafariTechnologyPreview":   "Safari Technology Preview",
+    "com.microsoft.edgemac.Beta":          "Microsoft Edge Beta",
+    "com.microsoft.edgemac.Dev":           "Microsoft Edge Dev",
+    "com.microsoft.edgemac.Canary":        "Microsoft Edge Canary",
 }
 
 

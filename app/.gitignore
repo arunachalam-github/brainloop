@@ -1,0 +1,11 @@
+# Rust / Cargo build artifacts
+src-tauri/target/
+
+# Tauri generated files (regenerated on build)
+src-tauri/gen/
+
+# macOS
+.DS_Store
+
+# Node (if npm is ever used)
+node_modules/

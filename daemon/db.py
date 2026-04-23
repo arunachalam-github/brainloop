@@ -55,6 +55,53 @@ def open_db() -> sqlite3.Connection:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ts       ON activity_log(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_app_name ON activity_log(app_name)")
+
+    # day_summary: one row per local-date, overwritten in place as the day progresses.
+    # payload_json holds the full structured summary consumed by the UI.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS day_summary (
+            date          TEXT PRIMARY KEY,
+            generated_at  INTEGER NOT NULL,
+            model         TEXT    NOT NULL,
+            activity_rows INTEGER NOT NULL,
+            payload_json  TEXT    NOT NULL,
+            tokens_in     INTEGER,
+            tokens_out    INTEGER
+        )
+    """)
+
+    # app_config: key/value settings written by the UI, read by the daemon.
+    # Holds ai_provider, ai_model, ai_base_url, ai_key_ref (Keychain lookup).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_config (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
+    # chat_messages: the Chat tab's conversation log. User turns arrive from
+    # the UI with status='pending'; the chat-poll timer in daemon.py picks
+    # them up, runs one LLM round with the run_sql tool, writes an assistant
+    # reply row, then flips the user row to status='done'. Conversation is
+    # persistent across sessions — the UI re-renders it on mount.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at      INTEGER NOT NULL,
+            role            TEXT    NOT NULL,
+            content         TEXT    NOT NULL,
+            tool_calls_json TEXT,
+            status          TEXT    NOT NULL DEFAULT 'done',
+            model           TEXT,
+            tokens_in       INTEGER,
+            tokens_out      INTEGER,
+            error           TEXT
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_status ON chat_messages(status, id)"
+    )
+
     # Migrations: add columns added after initial schema
     for col_def in (
         "page_text TEXT",

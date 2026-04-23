@@ -24,8 +24,18 @@ import AppKit
 import ApplicationServices as AS
 import CoreFoundation as CF
 
-from .config import HEARTBEAT_SECS, LOG_PATH, DB_PATH
+from .config import (
+    HEARTBEAT_SECS,
+    LOG_PATH,
+    DB_PATH,
+    ANALYZER_INTERVAL_SECS,
+    ANALYZER_FIRST_DELAY_SECS,
+    ANALYZER_MANUAL_POLL_SECS,
+    CHAT_POLL_SECS,
+)
 from . import db as _db
+from . import analyze as _analyze
+from . import chat as _chat
 from .capture.ax import get_active_app
 from .capture import observer as _observer
 from .capture import workspace as _workspace
@@ -53,14 +63,62 @@ def _heartbeat_cb(timer, info) -> None:
     log.info("heartbeat | total records: %d", _db.total_records())
 
 
+# ── Analyzer timer callback ───────────────────────────────────────────────────
+# Called every ANALYZER_INTERVAL_SECS. Uses the shared DB connection held by
+# the `db` module — that connection was opened with `check_same_thread=False`.
+# Every exception is swallowed: the analyzer must never kill the capture loop.
+
+def _analyzer_cb(timer, info) -> None:
+    try:
+        conn = _db._db  # intentionally private — the daemon owns the lifecycle
+        if conn is None:
+            return
+        _analyze.tick(conn)
+    except Exception:
+        log.exception("analyzer tick raised — suppressing to keep capture alive")
+
+
+# ── Manual-refresh poll timer ────────────────────────────────────────────────
+# Fires every ANALYZER_MANUAL_POLL_SECS. Serves UI-triggered refresh requests
+# written into app_config by the Tauri `analyze_now` command.
+
+def _manual_refresh_cb(timer, info) -> None:
+    try:
+        conn = _db._db
+        if conn is None:
+            return
+        _analyze.check_manual_request(conn)
+    except Exception:
+        log.exception("manual-refresh poll raised — suppressing")
+
+
+# ── Chat poll timer ──────────────────────────────────────────────────────────
+# Short cadence poll for pending user turns in chat_messages. One LLM tool-use
+# loop per call — see daemon.chat.check_pending.
+
+def _chat_cb(timer, info) -> None:
+    try:
+        conn = _db._db
+        if conn is None:
+            return
+        _chat.check_pending(conn)
+    except Exception:
+        log.exception("chat poll raised — suppressing")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     log.info("brainloop daemon starting")
     log.info("DB: %s", DB_PATH)
 
-    # Check Accessibility permission (prompt if missing)
-    ax_ok = AS.AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": True})
+    # Check Accessibility permission silently. We deliberately do NOT use
+    # `AXTrustedCheckOptionPrompt: True` here — the daemon restarts on every
+    # upgrade (and the binary signature changes, which invalidates the TCC
+    # grant), so a prompting check would surface a macOS popup on every
+    # restart until the user re-grants. The Settings UI has its own
+    # permission panel that shows this state without a modal.
+    ax_ok = AS.AXIsProcessTrusted()
     if ax_ok:
         log.info("Accessibility permission: granted")
     else:
@@ -102,6 +160,57 @@ def main() -> None:
     CF.CFRunLoopAddTimer(
         CF.CFRunLoopGetCurrent(), heartbeat_timer, CF.kCFRunLoopDefaultMode
     )
+
+    # Analyzer timer (30 min) — writes day_summary rows via LLM.
+    # First fire is delayed ANALYZER_FIRST_DELAY_SECS after startup so the
+    # capture loop has a chance to land at least one row before we analyze.
+    analyzer_timer = CF.CFRunLoopTimerCreate(
+        None,
+        CF.CFAbsoluteTimeGetCurrent() + ANALYZER_FIRST_DELAY_SECS,
+        ANALYZER_INTERVAL_SECS,
+        0,
+        0,
+        _analyzer_cb,
+        None,
+    )
+    CF.CFRunLoopAddTimer(
+        CF.CFRunLoopGetCurrent(), analyzer_timer, CF.kCFRunLoopDefaultMode
+    )
+    log.info(
+        "analyzer timer armed: first fire in %ds, then every %ds",
+        ANALYZER_FIRST_DELAY_SECS, ANALYZER_INTERVAL_SECS,
+    )
+
+    # Manual-refresh poll (fast cadence) — reads app_config to see if the UI
+    # asked for an immediate summary regeneration.
+    manual_refresh_timer = CF.CFRunLoopTimerCreate(
+        None,
+        CF.CFAbsoluteTimeGetCurrent() + ANALYZER_MANUAL_POLL_SECS,
+        ANALYZER_MANUAL_POLL_SECS,
+        0,
+        0,
+        _manual_refresh_cb,
+        None,
+    )
+    CF.CFRunLoopAddTimer(
+        CF.CFRunLoopGetCurrent(), manual_refresh_timer, CF.kCFRunLoopDefaultMode
+    )
+    log.info("manual-refresh poll armed: every %ds", ANALYZER_MANUAL_POLL_SECS)
+
+    # Chat poll (fast cadence) — serves UI-sent chat turns via tool-use loop.
+    chat_timer = CF.CFRunLoopTimerCreate(
+        None,
+        CF.CFAbsoluteTimeGetCurrent() + CHAT_POLL_SECS,
+        CHAT_POLL_SECS,
+        0,
+        0,
+        _chat_cb,
+        None,
+    )
+    CF.CFRunLoopAddTimer(
+        CF.CFRunLoopGetCurrent(), chat_timer, CF.kCFRunLoopDefaultMode
+    )
+    log.info("chat poll armed: every %ds", CHAT_POLL_SECS)
 
     # Graceful shutdown on SIGTERM / SIGINT
     rl = CF.CFRunLoopGetCurrent()

@@ -1,0 +1,1086 @@
+// Prevents additional console window on Windows in release
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+use rusqlite::{Connection, OpenFlags};
+use serde::Serialize;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use tauri::Manager;
+
+fn db_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
+    PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("brainloop")
+        .join("activity.db")
+}
+
+fn open_read_only() -> Result<Connection, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err(format!("db missing at {}", path.display()));
+    }
+    Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn row_count() -> Result<i64, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(0);
+    }
+    let conn = open_read_only()?;
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM activity_log", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+#[derive(Serialize)]
+struct DaySummary {
+    date: String,
+    generated_at: i64,
+    model: String,
+    activity_rows: i64,
+    tokens_in: Option<i64>,
+    tokens_out: Option<i64>,
+    // The LLM payload as a parsed JSON value so the frontend consumes it directly.
+    payload: serde_json::Value,
+}
+
+/// Returns the most recent day_summary row for today (local date). Returns
+/// None when either the database is missing the table (daemon not yet updated),
+/// or no row has been generated yet — frontend should show a listening state.
+#[tauri::command]
+fn today_summary() -> Result<Option<DaySummary>, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = open_read_only()?;
+
+    // If the table doesn't exist yet, return None gracefully.
+    let table_check: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='day_summary'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if table_check == 0 {
+        return Ok(None);
+    }
+
+    // Today's local date — compute via SQLite so it matches the analyzer's PK.
+    let mut stmt = conn
+        .prepare(
+            "SELECT date, generated_at, model, activity_rows, tokens_in, tokens_out, payload_json
+             FROM day_summary
+             WHERE date = date('now','localtime')
+             LIMIT 1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    let Some(row) = rows.next().map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+
+    let date: String = row.get(0).map_err(|e| e.to_string())?;
+    let generated_at: i64 = row.get(1).map_err(|e| e.to_string())?;
+    let model: String = row.get(2).map_err(|e| e.to_string())?;
+    let activity_rows: i64 = row.get(3).map_err(|e| e.to_string())?;
+    let tokens_in: Option<i64> = row.get(4).map_err(|e| e.to_string())?;
+    let tokens_out: Option<i64> = row.get(5).map_err(|e| e.to_string())?;
+    let payload_json: String = row.get(6).map_err(|e| e.to_string())?;
+
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_json).map_err(|e| e.to_string())?;
+
+    Ok(Some(DaySummary {
+        date,
+        generated_at,
+        model,
+        activity_rows,
+        tokens_in,
+        tokens_out,
+        payload,
+    }))
+}
+
+#[derive(Serialize)]
+struct DaemonStatus {
+    running: bool,
+    last_row_age_secs: Option<i64>,
+    total_today: i64,
+}
+
+/// Returns a lightweight status report for the Settings screen: whether the
+/// capture daemon has produced a row recently, and how many rows landed today.
+#[tauri::command]
+fn daemon_status() -> Result<DaemonStatus, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(DaemonStatus { running: false, last_row_age_secs: None, total_today: 0 });
+    }
+    let conn = open_read_only()?;
+
+    let last_ts: Option<f64> = conn
+        .query_row("SELECT MAX(ts) FROM activity_log", [], |row| row.get(0))
+        .ok()
+        .flatten();
+    let total_today: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM activity_log WHERE ts >= strftime('%s', date('now','localtime'))",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (running, last_row_age_secs) = match last_ts {
+        Some(ts) => {
+            let age = now - ts as i64;
+            // Treat <180s as running (heartbeat fires every 60s with 2x buffer).
+            (age < 180, Some(age))
+        }
+        None => (false, None),
+    };
+
+    Ok(DaemonStatus { running, last_row_age_secs, total_today })
+}
+
+#[derive(Serialize)]
+struct AppSlice {
+    app: String,
+    minutes: i64,
+}
+
+#[derive(Serialize)]
+struct ContentItem {
+    title: String,       // cleaned content title (page title, file name, etc.)
+    app: String,         // source app
+    dwell_secs: i64,     // heartbeats × 60s
+}
+
+#[derive(Serialize)]
+struct BucketApps {
+    apps: Vec<AppSlice>,
+    items: Vec<ContentItem>,
+    total_rows: i64,
+}
+
+/// Strip well-known browser-tab title suffixes ("- YouTube", "| Hacker News",
+/// etc.) so a 10-min bucket containing 3 different YouTube videos shows the
+/// video names rather than 3 entries reading "Foo - YouTube", "Bar - YouTube".
+fn clean_browser_title(title: &str) -> String {
+    let suffixes: &[&str] = &[
+        " - YouTube", " - Google Search", " - Google Docs", " - Google Sheets",
+        " - Google Slides", " - Gmail", " - Notion",
+        " | Hacker News", " · Hacker News",
+        " / X", " / Twitter", " - Twitter",
+        " - Reddit", " : r/all", " : r/popular",
+        " - GitHub", " · GitHub", " · Issue · GitHub", " · Pull Request · GitHub",
+        " - Substack", " | Substack",
+        " - Stack Overflow",
+        " - Wikipedia",
+        " - LinkedIn",
+        " | Medium",
+    ];
+    let trimmed = title.trim();
+    for s in suffixes {
+        if let Some(rest) = trimmed.strip_suffix(s) {
+            let cleaned = rest.trim();
+            if !cleaned.is_empty() {
+                return cleaned.to_string();
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+/// Strip leading "spinner / status" glyphs that long-running terminal apps
+/// rotate through their window title (✳, ⠂, ⠐, ⠁, ⠈ — Braille block U+2800–28FF,
+/// plus a couple of dingbats). Without this, a single in-progress task in
+/// iTerm gets bucketed as 3 different "apps" because each spinner frame ends
+/// up as a distinct GROUP BY key.
+fn strip_status_glyphs(s: &str) -> &str {
+    let mut s = s.trim_start();
+    loop {
+        let next = s.chars().next();
+        match next {
+            Some(c) if (0x2800..=0x28FF).contains(&(c as u32)) => {
+                s = s[c.len_utf8()..].trim_start();
+            }
+            Some('✳') | Some('●') | Some('○') | Some('◆') | Some('◇')
+            | Some('⏳') | Some('⏱') | Some('⚠') | Some('⚡') => {
+                s = s[next.unwrap().len_utf8()..].trim_start();
+            }
+            _ => break,
+        }
+    }
+    s
+}
+
+/// Per-app rules for turning a window_title into a display title.
+/// Returns None to drop the row entirely (system overlay etc.).
+fn canonical_title(app_name: &str, window_title: &str) -> Option<String> {
+    let title = strip_status_glyphs(window_title);
+    if title.is_empty() {
+        return None;
+    }
+    // Drop system / overlay apps that produce titles but aren't real activity.
+    if matches!(
+        app_name,
+        "loginwindow" | "Notification Center" | "WindowManager"
+            | "SystemUIServer" | "Control Center" | "Dock" | "Spotlight"
+    ) {
+        return None;
+    }
+
+    // IDEs use "filename — project" or "● filename — project". The leading
+    // ● indicates unsaved; strip it. Take the file name (left side).
+    const IDES: &[&str] = &[
+        "Code", "Cursor", "Xcode", "IntelliJ IDEA", "WebStorm", "PyCharm",
+        "Android Studio", "RubyMine", "CLion", "GoLand", "Rider", "Nova",
+        "Sublime Text", "TextMate", "BBEdit", "Zed",
+    ];
+    if IDES.contains(&app_name) {
+        let cleaned = title.trim_start_matches('●').trim();
+        if let Some((file, _)) = cleaned.split_once(" — ") {
+            let f = file.trim();
+            if !f.is_empty() {
+                return Some(f.to_string());
+            }
+        }
+        return Some(cleaned.to_string());
+    }
+
+    // Browsers — strip platform suffix from the page title.
+    const BROWSERS: &[&str] = &[
+        "Google Chrome", "Safari", "Arc", "Brave Browser", "Microsoft Edge",
+        "Comet", "Vivaldi", "Chromium", "Firefox", "DuckDuckGo", "Opera",
+    ];
+    if BROWSERS.contains(&app_name) {
+        let cleaned = clean_browser_title(title);
+        return if cleaned.is_empty() { None } else { Some(cleaned) };
+    }
+
+    Some(title.to_string())
+}
+
+/// Top apps + content items inside a `[start_ts, end_ts)` window. Used by
+/// the waveform hover tooltip. `apps` is the existing app-strip line; `items`
+/// is the new content list (top 3 things the user actually attended to).
+#[tauri::command]
+fn bucket_apps(start_ts: i64, end_ts: i64) -> Result<BucketApps, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(BucketApps { apps: vec![], items: vec![], total_rows: 0 });
+    }
+    let conn = open_read_only()?;
+
+    let total_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM activity_log WHERE ts >= ? AND ts < ?",
+            [start_ts, end_ts],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    // ── App strip (existing): top apps by heartbeat count ─────────────────
+    let mut app_stmt = conn
+        .prepare(
+            "SELECT COALESCE(app_name, '—') AS app, COUNT(*) AS n
+             FROM activity_log
+             WHERE ts >= ? AND ts < ?
+             GROUP BY app
+             ORDER BY n DESC
+             LIMIT 3",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let apps: Vec<AppSlice> = app_stmt
+        .query_map([start_ts, end_ts], |row| {
+            Ok(AppSlice {
+                app: row.get::<_, String>(0)?,
+                minutes: row.get::<_, i64>(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // ── Content items (new): heartbeats grouped by canonical title ────────
+    //
+    // We take heartbeat rows only (1 per minute per active app), so the
+    // count is a faithful dwell estimate. window_title must be non-empty;
+    // empty titles either mean AX is denied or the app is system chrome.
+    let mut content_stmt = conn
+        .prepare(
+            "SELECT COALESCE(app_name, '') AS app,
+                    COALESCE(window_title, '') AS title,
+                    COUNT(*) AS heartbeats
+             FROM activity_log
+             WHERE ts >= ? AND ts < ?
+               AND trigger = 'heartbeat'
+               AND COALESCE(window_title, '') != ''
+             GROUP BY app, title
+             ORDER BY heartbeats DESC
+             LIMIT 30",
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Aggregate into a map keyed by (app, canonical_title) — same canonical
+    // title in different apps stays separate (e.g. Google Doc opened in both
+    // Comet and Chrome should show with each browser as its own row, since
+    // we deliberately want to surface where the activity actually happened).
+    use std::collections::HashMap;
+    let mut agg: HashMap<(String, String), i64> = HashMap::new();
+    let mut order: Vec<(String, String)> = Vec::new();
+    let raw_rows = content_stmt
+        .query_map([start_ts, end_ts], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok());
+
+    for (app, title, heartbeats) in raw_rows {
+        let canon = match canonical_title(&app, &title) {
+            Some(t) => t,
+            None => continue,
+        };
+        let key = (app.clone(), canon);
+        if !agg.contains_key(&key) {
+            order.push(key.clone());
+        }
+        *agg.entry(key).or_insert(0) += heartbeats;
+    }
+
+    // Sort by dwell desc, ties broken by first-seen order from `order`.
+    let mut keys: Vec<&(String, String)> = agg.keys().collect();
+    keys.sort_by(|a, b| {
+        let da = agg[*a];
+        let db = agg[*b];
+        db.cmp(&da)
+            .then_with(|| {
+                let ai = order.iter().position(|k| k == *a).unwrap_or(usize::MAX);
+                let bi = order.iter().position(|k| k == *b).unwrap_or(usize::MAX);
+                ai.cmp(&bi)
+            })
+    });
+
+    let items: Vec<ContentItem> = keys
+        .into_iter()
+        .take(3)
+        .map(|k| ContentItem {
+            title: k.1.clone(),
+            app: k.0.clone(),
+            dwell_secs: agg[k] * 60, // 1 heartbeat ≈ 60s of dwell
+        })
+        .collect();
+
+    Ok(BucketApps { apps, items, total_rows })
+}
+
+#[derive(Serialize)]
+struct PermissionsStatus {
+    accessibility: String,     // "granted" | "not_granted" | "unknown"
+    screen_recording: String,  // always "optional" — we don't use it
+}
+
+/// Best-effort Accessibility detection for the daemon.
+///
+/// We can't call AXIsProcessTrusted() on the daemon from the UI — TCC
+/// grants are per-binary. Instead we read the FRESHEST heartbeat rows
+/// (last 180s only) and infer from whether window_title was captured.
+///
+/// Narrow window (180s, ~3 heartbeats) is deliberate: when the user
+/// toggles AX in System Settings, the badge should flip within a couple
+/// of minutes, not ten. Older rows from before the toggle are ignored
+/// entirely so they can't dominate the vote.
+///
+/// Rules, evaluated in order:
+///   1. Newest heartbeat is > 180s old  → "unknown" (daemon not writing).
+///   2. ≥1 fresh row with a window_title and 0 fresh rows without       → "granted".
+///   3. ≥1 fresh row without a window_title and 0 fresh rows with        → "not_granted".
+///   4. Fresh rows split (daemon running but AX was just toggled — use
+///      the majority among rows from the last 180s; tie goes to newest).
+///   5. No fresh non-loginwindow rows                                    → "unknown".
+#[tauri::command]
+fn permissions_status() -> Result<PermissionsStatus, String> {
+    let mut out = PermissionsStatus {
+        accessibility: "unknown".into(),
+        screen_recording: "optional".into(),
+    };
+    let path = db_path();
+    if !path.exists() {
+        return Ok(out);
+    }
+    let conn = open_read_only()?;
+
+    // Rust-side "now" in unix seconds; the DB stores `ts` as unix float.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+
+    const FRESH_WINDOW_SECS: f64 = 180.0; // last 3 minutes
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT window_title, app_name, ts FROM activity_log
+             WHERE trigger = 'heartbeat'
+             ORDER BY ts DESC LIMIT 20",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows_iter = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, f64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    // Keep heartbeats from inside the fresh window, newest first.
+    let mut fresh_titled = 0u32;
+    let mut fresh_untitled = 0u32;
+    let mut newest_ts: Option<f64> = None;
+    let mut newest_has_title: Option<bool> = None;
+    for r in rows_iter.filter_map(|r| r.ok()) {
+        let (title, app, ts) = r;
+        if newest_ts.is_none() {
+            newest_ts = Some(ts);
+        }
+        if now - ts > FRESH_WINDOW_SECS {
+            break; // rows are ordered newest-first, rest are older
+        }
+        let is_user_app = app
+            .as_deref()
+            .map(|s| !s.is_empty() && s != "loginwindow")
+            .unwrap_or(false);
+        if !is_user_app {
+            continue;
+        }
+        let has_title = title
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        if newest_has_title.is_none() {
+            newest_has_title = Some(has_title);
+        }
+        if has_title {
+            fresh_titled += 1;
+        } else {
+            fresh_untitled += 1;
+        }
+    }
+
+    // If the most recent heartbeat is stale, the daemon isn't writing —
+    // we have no signal either way.
+    let stale = match newest_ts {
+        Some(ts) => now - ts > FRESH_WINDOW_SECS,
+        None => true,
+    };
+    if stale {
+        return Ok(out); // already "unknown"
+    }
+
+    out.accessibility = if fresh_titled > 0 && fresh_untitled == 0 {
+        "granted".into()
+    } else if fresh_untitled > 0 && fresh_titled == 0 {
+        "not_granted".into()
+    } else if fresh_titled > fresh_untitled {
+        "granted".into()
+    } else if fresh_untitled > fresh_titled {
+        "not_granted".into()
+    } else if let Some(latest) = newest_has_title {
+        // Tie — trust the most recent heartbeat.
+        if latest { "granted".into() } else { "not_granted".into() }
+    } else {
+        "unknown".into()
+    };
+
+    Ok(out)
+}
+
+/// Open the correct macOS System Settings pane for a permission the user
+/// needs to toggle. Takes a short key ("accessibility", "apple_events",
+/// "screen_recording") and runs `open x-apple.systempreferences:...`.
+#[tauri::command]
+fn open_permission_pane(kind: String) -> Result<(), String> {
+    let url = match kind.as_str() {
+        "accessibility"  => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "apple_events"   => "x-apple.systempreferences:com.apple.preference.security?Privacy_AppleEvents",
+        "screen_recording" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        _ => return Err(format!("unknown permission kind: {}", kind)),
+    };
+    Command::new("open")
+        .arg(url)
+        .status()
+        .map_err(|e| format!("open: {}", e))?;
+    Ok(())
+}
+
+/// Reveal the embedded daemon binary in Finder so the user can drag-and-drop
+/// it into the Accessibility list (macOS won't populate the list unless the
+/// app has been granted or prompted — on a fresh bundled install, neither
+/// has happened yet). `open -R` selects the file in Finder.
+#[tauri::command]
+fn reveal_daemon_binary(app: tauri::AppHandle) -> Result<String, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resolve resource dir: {}", e))?;
+    let daemon_bin = resource_dir.join("resources").join("brainloopd");
+    if !daemon_bin.exists() {
+        return Err(format!(
+            "daemon binary not found at {} (dev mode?)",
+            daemon_bin.display()
+        ));
+    }
+    Command::new("open")
+        .arg("-R")
+        .arg(&daemon_bin)
+        .status()
+        .map_err(|e| format!("open -R: {}", e))?;
+    Ok(daemon_bin.display().to_string())
+}
+
+#[derive(Serialize)]
+struct AiConfig {
+    provider: String,
+    model: String,
+    base_url: String,
+    // key_hint is a non-sensitive "is one set + last 4" display — never the raw key.
+    key_hint: String,
+}
+
+/// Read the AI provider config from `app_config`. Returns a minimal default
+/// when no row is present yet so the UI can still show a usable form.
+#[tauri::command]
+fn ai_config_load() -> Result<AiConfig, String> {
+    let mut cfg = AiConfig {
+        provider: "anthropic".into(),
+        model: "claude-sonnet-4-5".into(),
+        base_url: "https://api.anthropic.com".into(),
+        key_hint: "".into(),
+    };
+    let path = db_path();
+    if !path.exists() {
+        return Ok(cfg);
+    }
+    let conn = open_read_only()?;
+    let has_table: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_config'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if has_table == 0 {
+        return Ok(cfg);
+    }
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM app_config")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    for kv in rows.filter_map(|r| r.ok()) {
+        match kv.0.as_str() {
+            "ai_provider" => cfg.provider = kv.1,
+            "ai_model" => cfg.model = kv.1,
+            "ai_base_url" => cfg.base_url = kv.1,
+            "ai_api_key" => {
+                if !kv.1.is_empty() {
+                    let tail: String = kv.1.chars().rev().take(4).collect::<String>().chars().rev().collect();
+                    cfg.key_hint = format!("••• {}", tail);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(cfg)
+}
+
+/// Persist the AI provider config. `api_key` is optional — if empty, keep
+/// whatever key is already stored. The daemon reads these values on its next
+/// analyzer tick.
+#[tauri::command]
+fn ai_config_save(
+    provider: String,
+    model: String,
+    base_url: String,
+    api_key: String,
+) -> Result<(), String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err(format!(
+            "database not found at {} — is the daemon installed?",
+            path.display()
+        ));
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let upsert = |k: &str, v: &str| -> Result<(), String> {
+        tx.execute(
+            "INSERT INTO app_config(key,value) VALUES(?1,?2)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [k, v],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    };
+    upsert("ai_provider", &provider)?;
+    upsert("ai_model", &model)?;
+    upsert("ai_base_url", &base_url)?;
+    if !api_key.is_empty() {
+        upsert("ai_api_key", &api_key)?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Total on-disk size of the SQLite database, in bytes. Includes the main
+/// .db file plus the WAL and shm sidecars, since we use WAL mode and the
+/// WAL can grow substantially between checkpoints. Returns 0 when the DB
+/// doesn't exist yet (fresh install).
+#[tauri::command]
+fn db_size_bytes() -> Result<i64, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(0);
+    }
+    let mut total: u64 = 0;
+    for suffix in ["", "-wal", "-shm"] {
+        let p = if suffix.is_empty() {
+            path.clone()
+        } else {
+            let mut s = path.clone().into_os_string();
+            s.push(suffix);
+            std::path::PathBuf::from(s)
+        };
+        if let Ok(md) = std::fs::metadata(&p) {
+            total += md.len();
+        }
+    }
+    Ok(total as i64)
+}
+
+/// Export today's activity_log rows and day_summary row as a pretty-printed
+/// JSON file to ~/Desktop. Returns the written file path so the UI can show
+/// "Exported to ~/Desktop/brainloop-YYYY-MM-DD.json".
+#[tauri::command]
+fn export_today_json() -> Result<String, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found".into());
+    }
+    let conn = open_read_only()?;
+
+    // Compute today's local date string to match day_summary PK + UI expectation.
+    let date: String = conn
+        .query_row("SELECT date('now','localtime')", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+
+    // activity_log rows for today.
+    let mut stmt = conn
+        .prepare(
+            "SELECT ts, ts_iso, trigger, app_name, bundle_id, window_title,
+                    browser_url, page_text, visible_text, audio_playing,
+                    mic_active, audio_device, mic_device
+             FROM activity_log
+             WHERE ts >= strftime('%s', date('now','localtime'))
+             ORDER BY ts",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows_iter = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "ts": row.get::<_, f64>(0).unwrap_or(0.0),
+                "ts_iso": row.get::<_, Option<String>>(1).unwrap_or(None),
+                "trigger": row.get::<_, Option<String>>(2).unwrap_or(None),
+                "app_name": row.get::<_, Option<String>>(3).unwrap_or(None),
+                "bundle_id": row.get::<_, Option<String>>(4).unwrap_or(None),
+                "window_title": row.get::<_, Option<String>>(5).unwrap_or(None),
+                "browser_url": row.get::<_, Option<String>>(6).unwrap_or(None),
+                "page_text": row.get::<_, Option<String>>(7).unwrap_or(None),
+                "visible_text": row.get::<_, Option<String>>(8).unwrap_or(None),
+                "audio_playing": row.get::<_, Option<i64>>(9).unwrap_or(None),
+                "mic_active": row.get::<_, Option<i64>>(10).unwrap_or(None),
+                "audio_device": row.get::<_, Option<String>>(11).unwrap_or(None),
+                "mic_device": row.get::<_, Option<String>>(12).unwrap_or(None),
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    let activity: Vec<serde_json::Value> = rows_iter.filter_map(|r| r.ok()).collect();
+
+    // day_summary for today, if present.
+    let summary: Option<serde_json::Value> = conn
+        .query_row(
+            "SELECT generated_at, model, activity_rows, tokens_in, tokens_out, payload_json
+             FROM day_summary WHERE date = ?1",
+            [&date],
+            |row| {
+                let payload_json: String = row.get(5)?;
+                let payload: serde_json::Value =
+                    serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
+                Ok(serde_json::json!({
+                    "generated_at": row.get::<_, i64>(0)?,
+                    "model": row.get::<_, String>(1)?,
+                    "activity_rows": row.get::<_, i64>(2)?,
+                    "tokens_in": row.get::<_, Option<i64>>(3)?,
+                    "tokens_out": row.get::<_, Option<i64>>(4)?,
+                    "payload": payload,
+                }))
+            },
+        )
+        .ok();
+
+    let doc = serde_json::json!({
+        "date": date,
+        "exported_at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+        "activity_row_count": activity.len(),
+        "summary": summary,
+        "activity": activity,
+    });
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let out = std::path::PathBuf::from(home)
+        .join("Desktop")
+        .join(format!("brainloop-{}.json", date));
+    std::fs::write(&out, serde_json::to_vec_pretty(&doc).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("write: {}", e))?;
+    Ok(out.display().to_string())
+}
+
+/// Permanently wipe the activity_log and day_summary tables. Config (keys,
+/// provider) is preserved so the user doesn't have to re-enter it. Runs
+/// VACUUM afterwards to release disk space. The UI must confirm before
+/// calling this — there is no undo.
+#[tauri::command]
+fn delete_all_data() -> Result<(), String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found".into());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM activity_log", []).map_err(|e| e.to_string())?;
+    // day_summary may not exist on very old installs — ignore missing-table errors.
+    let _ = conn.execute("DELETE FROM day_summary", []);
+    // Also clear any pending manual-refresh markers so the daemon doesn't
+    // immediately try to regenerate a summary over the empty table.
+    let _ = conn.execute(
+        "DELETE FROM app_config WHERE key IN ('analyze_requested_at','analyze_served_at')",
+        [],
+    );
+    conn.execute("VACUUM", []).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct ChatMessage {
+    id: i64,
+    created_at: i64,
+    role: String,
+    content: String,
+    status: String,
+}
+
+/// Append a new `user` turn to chat_messages with status='pending'. The
+/// daemon's chat-poll timer picks it up within ~CHAT_POLL_SECS, runs a
+/// tool-use loop, and writes an `assistant` reply. Returns the new row id so
+/// the UI can track poll progress against it.
+#[tauri::command]
+fn chat_send(text: String) -> Result<i64, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found — is the daemon installed?".into());
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("empty message".into());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chat_messages (\
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, \
+            role TEXT NOT NULL, content TEXT NOT NULL, tool_calls_json TEXT, \
+            status TEXT NOT NULL DEFAULT 'done', model TEXT, \
+            tokens_in INTEGER, tokens_out INTEGER, error TEXT)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT INTO chat_messages(created_at, role, content, status) \
+         VALUES(?1, 'user', ?2, 'pending')",
+        rusqlite::params![now, trimmed],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Return chat_messages rows with id > since_id in ascending id order. Only
+/// user-facing fields are returned — the UI doesn't need the tool_calls_json
+/// or token counts.
+#[tauri::command]
+fn chat_history(since_id: Option<i64>) -> Result<Vec<ChatMessage>, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    let conn = open_read_only()?;
+    let has_table: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chat_messages'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if has_table == 0 {
+        return Ok(vec![]);
+    }
+    let since = since_id.unwrap_or(0);
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, created_at, role, content, status \
+             FROM chat_messages \
+             WHERE id > ?1 AND role IN ('user','assistant','error') \
+             ORDER BY id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([since], |row| {
+            Ok(ChatMessage {
+                id: row.get(0)?,
+                created_at: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                status: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Wipe the chat conversation. Does not touch activity_log or day_summary.
+#[tauri::command]
+fn chat_reset() -> Result<(), String> {
+    let path = db_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    let _ = conn.execute("DELETE FROM chat_messages", []);
+    Ok(())
+}
+
+/// Tell the daemon to regenerate today's summary now, bypassing its 30-min
+/// regen gate. We communicate through the shared SQLite — the daemon polls
+/// `app_config` on a short timer (see daemon/analyze.py::check_manual_request).
+/// Returns the request timestamp so the UI can track progress against
+/// `today_summary().generated_at`.
+#[tauri::command]
+fn analyze_now() -> Result<i64, String> {
+    let path = db_path();
+    if !path.exists() {
+        return Err("database not found — is the daemon installed?".into());
+    }
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT INTO app_config(key,value) VALUES('analyze_requested_at',?1) \
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [now.to_string()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(now)
+}
+
+// ── First-launch daemon install ──────────────────────────────────────────────
+//
+// When the app starts from a bundled .app (say, /Applications/Brainloop.app),
+// we write a LaunchAgent plist pointing at the embedded daemon binary and
+// tell launchctl to load it. Idempotent: if the plist already points at this
+// binary we do nothing; if the .app moved locations, we regenerate and reload.
+//
+// Dev-mode safety: if the resource binary doesn't exist (e.g. `cargo tauri
+// dev` without `make bundle-daemon`), we skip silently so development isn't
+// gated on a release build.
+
+const DAEMON_LABEL: &str = "com.brainloop.agent";
+
+fn launchagent_plist_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home)
+        .join("Library")
+        .join("LaunchAgents")
+        .join(format!("{}.plist", DAEMON_LABEL))
+}
+
+fn runtime_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("brainloop")
+}
+
+fn render_plist(daemon_bin: &PathBuf, rt_dir: &PathBuf) -> String {
+    // Built from scratch rather than substituting into the source-mode
+    // template — bundle mode runs the compiled binary directly, no
+    // python -m indirection.
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{daemon}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>{rt}/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>{rt}/daemon-err.log</string>
+</dict>
+</plist>
+"#,
+        label = DAEMON_LABEL,
+        daemon = daemon_bin.display(),
+        rt = rt_dir.display(),
+    )
+}
+
+fn ensure_daemon_installed(app: &tauri::AppHandle) -> Result<(), String> {
+    // 1. Make sure the runtime directory exists (daemon writes its DB + logs there).
+    let rt = runtime_dir();
+    fs::create_dir_all(&rt).map_err(|e| format!("create runtime dir: {}", e))?;
+
+    // 2. Resolve the embedded daemon binary. In dev mode this resource doesn't
+    //    exist — skip silently so `cargo tauri dev` isn't gated on a release build.
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resolve resource dir: {}", e))?;
+    let daemon_bin = resource_dir.join("resources").join("brainloopd");
+
+    if !daemon_bin.exists() {
+        eprintln!(
+            "[brainloop] daemon binary not bundled at {} — dev mode, skipping install",
+            daemon_bin.display()
+        );
+        return Ok(());
+    }
+
+    // 3. Render and compare against existing plist. If identical, the daemon
+    //    should already be loaded — nothing to do.
+    let plist_text = render_plist(&daemon_bin, &rt);
+    let plist_path = launchagent_plist_path();
+    fs::create_dir_all(plist_path.parent().unwrap())
+        .map_err(|e| format!("create LaunchAgents dir: {}", e))?;
+
+    if let Ok(existing) = fs::read_to_string(&plist_path) {
+        if existing == plist_text {
+            eprintln!("[brainloop] LaunchAgent already current at {}", plist_path.display());
+            return Ok(());
+        }
+        // Existing plist is stale (e.g. user moved the .app). Unload first.
+        let _ = Command::new("launchctl")
+            .args(["unload", plist_path.to_str().unwrap()])
+            .status();
+    }
+
+    // 4. Write the new plist and load it.
+    fs::write(&plist_path, &plist_text).map_err(|e| format!("write plist: {}", e))?;
+    let out = Command::new("launchctl")
+        .args(["load", plist_path.to_str().unwrap()])
+        .output()
+        .map_err(|e| format!("launchctl load: {}", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "launchctl load failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    eprintln!(
+        "[brainloop] Installed LaunchAgent → {}",
+        plist_path.display()
+    );
+    Ok(())
+}
+
+fn main() {
+    tauri::Builder::default()
+        .setup(|app| {
+            // Run the installer off the main thread — launchctl can block briefly
+            // during unload/load and we don't want to hold up window creation.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Err(e) = ensure_daemon_installed(&handle) {
+                    eprintln!("[brainloop] daemon install failed: {}", e);
+                }
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            row_count,
+            today_summary,
+            daemon_status,
+            bucket_apps,
+            ai_config_load,
+            ai_config_save,
+            permissions_status,
+            open_permission_pane,
+            reveal_daemon_binary,
+            analyze_now,
+            db_size_bytes,
+            export_today_json,
+            delete_all_data,
+            chat_send,
+            chat_history,
+            chat_reset
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

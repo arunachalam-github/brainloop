@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brainloop</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="topbar">
+      <div class="wordmark"><span class="glyph"></span>brainloop</div>
+      <div class="tabs" id="tab-bar">
+        <button type="button" class="tab active" data-tab="today">Today</button>
+        <button type="button" class="tab" data-tab="chat">Chat</button>
+        <button type="button" class="tab" data-tab="settings">Settings</button>
+      </div>
+      <div class="meta-group">
+        <div class="meta" id="meta-date">—</div>
+        <button type="button" class="meta-refresh" id="btn-refresh-summary" title="Refresh today's summary" aria-label="Refresh today's summary">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <span class="refresh-status" id="refresh-status" aria-live="polite"></span>
+      </div>
+    </div>
+
+    <main class="page" id="page">
+      <!-- TODAY -->
+      <section class="screen active" id="screen-today" data-screen-label="today">
+        <div id="today-content">
+          <!-- populated by main.js. Default is empty state; hydrates when today_summary() resolves. -->
+        </div>
+      </section>
+
+      <!-- CHAT -->
+      <section class="screen" id="screen-chat" data-screen-label="chat">
+        <div class="chat-full">
+          <div class="hero reveal" style="padding-bottom: 24px; position: relative;">
+            <div class="hero-eyebrow">Chat · ask your day anything</div>
+            <h1 class="hero-phrase" style="font-size: clamp(28px, 3.6vw, 44px);">A quiet place to ask your laptop what it saw today.</h1>
+            <button type="button" class="chat-new" id="btn-chat-new" title="Start a new chat (clears history)" aria-label="Start a new chat">
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+              <span>New chat</span>
+            </button>
+          </div>
+          <div class="chat-body" id="chat-body">
+            <div class="chat-msg bot">Hi. I can tell you about your day — what you worked on, where the monkey took over, when you actually rested. What do you want to know?</div>
+          </div>
+          <div class="chat-suggestions" id="chat-suggestions">
+            <button type="button" class="chat-suggestion">What did I do in the last 30 minutes?</button>
+            <button type="button" class="chat-suggestion">Was I on any calls today? Who with?</button>
+            <button type="button" class="chat-suggestion">What did I work on most this morning?</button>
+            <button type="button" class="chat-suggestion">When did I take a break?</button>
+            <button type="button" class="chat-suggestion">What was I reading around 3pm?</button>
+          </div>
+          <div class="chat-input">
+            <input id="chat-input" placeholder="Ask about your day…" />
+            <button type="button" class="chat-send" id="chat-send" aria-label="Send">
+              <svg viewBox="0 0 16 16" fill="none"><path d="M2 8l12-6-4 14-2-6-6-2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="screen" id="screen-settings" data-screen-label="settings">
+        <div class="settings-wrap reveal">
+          <div class="hero" style="padding-top: 0px; padding-bottom: 16px;">
+            <div class="hero-eyebrow">Settings</div>
+            <h1 class="hero-phrase" style="font-size: clamp(28px, 3.6vw, 44px);">Your keys. Your data. On your machine.</h1>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">AI provider</div>
+            <div class="set-desc">Bring your own key. We never see it — queries go straight from your Mac to the provider you pick.</div>
+            <div class="provider-tabs" id="provider-tabs">
+              <button type="button" class="provider-tab" data-provider="anthropic">Anthropic</button>
+              <button type="button" class="provider-tab active" data-provider="openai">OpenAI <span class="provider-default-hint">default</span></button>
+              <button type="button" class="provider-tab" data-provider="gemini">Gemini</button>
+            </div>
+            <div class="set-field">
+              <label>API key</label>
+              <input type="password" id="set-api-key" placeholder="sk-…  (OpenAI key)" />
+            </div>
+            <div class="set-field">
+              <label>Model</label>
+              <input id="set-model" value="gpt-4o-mini" />
+            </div>
+            <div class="set-field">
+              <label>Base URL</label>
+              <input id="set-base-url" value="https://api.openai.com/v1" />
+              <div class="set-hint">Point this at <strong>OpenRouter</strong>, <strong>Requesty</strong>, or any OpenAI-compatible gateway — pick the "OpenAI" tab and paste the gateway URL here. For OpenRouter: <code>https://openrouter.ai/api/v1</code></div>
+            </div>
+            <div class="set-actions">
+              <button type="button" id="btn-save-ai" class="btn-primary">Save</button>
+              <span id="ai-save-status" class="ai-save-status"></span>
+            </div>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">Permissions <button type="button" id="perm-recheck" class="perm-link">Re-check</button></div>
+            <div class="set-desc">Brainloop needs a couple of macOS permissions to see what you see. We only use what you grant.</div>
+            <div class="perm-row" data-perm="accessibility">
+              <div>
+                <div class="perm-name">Accessibility</div>
+                <div class="perm-desc">Window titles, URLs, text of focused elements.</div>
+                <div class="perm-help" data-role="help">
+                  Not in the list? Click <button type="button" class="perm-inline-link" id="reveal-daemon">Show daemon in Finder</button>, then drag <code>brainloopd</code> from Finder into the Accessibility list in System Settings and toggle it on.
+                </div>
+              </div>
+              <div class="perm-actions">
+                <button type="button" class="perm-open" data-kind="accessibility">Open System Settings ↗</button>
+                <span class="perm-badge unknown" data-role="badge">checking…</span>
+              </div>
+            </div>
+            <div class="perm-row" data-perm="screen_recording">
+              <div>
+                <div class="perm-name">Screen Recording</div>
+                <div class="perm-desc">Optional. Improves capture for some apps.</div>
+              </div>
+              <div class="perm-badge warn">optional</div>
+            </div>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">Data</div>
+            <div class="set-desc">Everything lives in a SQLite file on your Mac. Nothing is uploaded, synced, or sent anywhere.</div>
+            <div class="set-field">
+              <label>Database location</label>
+              <input readonly value="~/Library/Application Support/brainloop/activity.db" />
+            </div>
+            <div class="set-field">
+              <label>Size on disk</label>
+              <input readonly id="db-size" value="—" />
+            </div>
+            <div class="data-actions">
+              <button type="button" class="data-action" id="btn-export-today">Export today</button>
+              <button type="button" class="data-action danger" id="btn-delete-all">Delete all data</button>
+              <span class="data-status" id="data-status" aria-live="polite"></span>
+            </div>
+          </div>
+
+          <div class="set-section">
+            <div class="set-title">Daemon</div>
+            <div class="set-desc">Status of the background process that records your activity.</div>
+            <div class="perm-row" id="daemon-row">
+              <div>
+                <div class="perm-name">brainloop-daemon</div>
+                <div class="perm-desc" id="daemon-desc">checking…</div>
+              </div>
+              <div class="perm-badge warn" id="daemon-badge">pending</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="viz-tooltip" id="viz-tooltip"></div>
+  <script src="main.js"></script>
+</body>
+</html>
